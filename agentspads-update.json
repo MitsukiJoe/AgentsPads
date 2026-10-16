@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "tag_name": "v0.2.1",
+  "version": "0.2.1",
+  "release_url": "https://github.com/MitsukiJoe/AgentsPads/releases/tag/v0.2.1",
+  "body": "**Full Changelog**: https://github.com/MitsukiJoe/AgentsPads/compare/v0.2.0...v0.2.1\n",
+  "assets": {
+    "windows": {
+      "name": "agentspads-windows-x64.exe",
+      "url": "https://github.com/MitsukiJoe/AgentsPads/releases/download/v0.2.1/agentspads-windows-x64.exe",
+      "sha256": "9c78a8fa92530275a9ea3f8a790a544efcacf945673527047883c9f88ee89170"
+    },
+    "macos": {
+      "name": "agentspads-macos-arm64.zip",
+      "url": "https://github.com/MitsukiJoe/AgentsPads/releases/download/v0.2.1/agentspads-macos-arm64.zip",
+      "sha256": "d99da740b01efe935c24a08616b1b9a4910cd0dd22cba23e6f42a6f5f8267e8e"
+    },
+    "android": {
+      "name": "agentspads.apk",
+      "url": "https://github.com/MitsukiJoe/AgentsPads/releases/download/v0.2.1/agentspads.apk",
+      "sha256": "f73c745b5ce2ee6919b50e6d80c773ded736868a9cf67b0911db136b249b0bf9"
+    }
+  }
+}
