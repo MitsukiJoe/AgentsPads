@@ -3,7 +3,7 @@
   "tag_name": "v0.2.1",
   "version": "0.2.1",
   "release_url": "https://github.com/MitsukiJoe/AgentsPads/releases/tag/v0.2.1",
-  "body": "**Full Changelog**: https://github.com/MitsukiJoe/AgentsPads/compare/v0.2.0...v0.2.1\n",
+  "body": "## 修复内容\n\n- 修复 Windows 管理员模式启停与普通权限窗口交接\n- 启动或清理受阻时保留原实例和安装状态，明确报错并支持重试\n- 强化 ready、进程权限和身份存储校验，存储失败时停止服务\n- 修复暂停、断线和退出时的按键残留，丢弃过期输入\n- Android 主题切换改为仅记录待更新图标不强制重启待下次启动时生效\n- 补全端口冲突提示，新增默认关闭的有界性能探针及回归测试\n\n## 验收范围\n\n已完成 debug 构建的日常使用实机验收、精确性能补测和自动化回归。UAC 取消及最终发布包实机冒烟延至下一轮；真实跨会话测试暂不纳入本轮。\n\n**完整变更：** https://github.com/MitsukiJoe/AgentsPads/compare/v0.2.0...v0.2.1\n",
   "assets": {
     "windows": {
       "name": "agentspads-windows-x64.exe",
