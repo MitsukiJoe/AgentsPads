@@ -30,13 +30,18 @@
               android:resource="@style/NormalTheme"
               />
         </activity>
-        <!-- 启动入口只放在 alias 上。禁用真实 Activity 会让 AMS 结束正在运行的界面。 -->
+        <!-- Launcher trampoline exits before MainActivity applies a pending alias change. -->
+        <activity
+            android:name=".LauncherTrampolineActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.NoDisplay" />
         <activity-alias
             android:name=".MainActivityWhite"
             android:enabled="true"
             android:exported="true"
             android:icon="@mipmap/ic_launcher"
-            android:targetActivity=".MainActivity">
+            android:targetActivity=".LauncherTrampolineActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
@@ -47,7 +52,7 @@
             android:enabled="false"
             android:exported="true"
             android:icon="@mipmap/ic_launcher_black"
-            android:targetActivity=".MainActivity">
+            android:targetActivity=".LauncherTrampolineActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>

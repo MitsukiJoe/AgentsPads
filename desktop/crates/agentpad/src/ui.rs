@@ -145,21 +145,35 @@ pub fn show_startup_failure(reason: &str) -> eframe::Result {
     struct StartupFailure(String);
     impl eframe::App for StartupFailure {
         fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-            ui.heading("AgentsPads 启动失败");
-            ui.add_space(12.0);
-            ui.label(&self.0);
-            ui.add_space(12.0);
-            ui.label("当前未接收输入。解决问题后重新打开应用。");
-            if ui.button("关闭").clicked() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
+            let panel_fill = ui.visuals().panel_fill;
+            let text_color = ui.visuals().text_color();
+            egui::CentralPanel::default()
+                .frame(
+                    egui::Frame::new()
+                        .fill(panel_fill)
+                        .inner_margin(egui::Margin::symmetric(24, 18)),
+                )
+                .show(ui, |ui| {
+                    ui.heading(egui::RichText::new("AgentsPads 启动失败").color(text_color));
+                    ui.add_space(12.0);
+                    ui.colored_label(text_color, &self.0);
+                    ui.add_space(12.0);
+                    ui.colored_label(text_color, "当前未接收输入。解决问题后重新打开应用。");
+                    if ui.button("关闭").clicked() {
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                    }
+                });
+        }
+
+        fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+            visuals.panel_fill.to_normalized_gamma_f32()
         }
     }
     let reason = reason.to_string();
     eframe::run_native(
         "AgentsPads",
         eframe::NativeOptions {
-            viewport: egui::ViewportBuilder::default().with_inner_size([520.0, 200.0]),
+            viewport: egui::ViewportBuilder::default().with_inner_size([520.0, 220.0]),
             ..Default::default()
         },
         Box::new(move |cc| {
@@ -214,6 +228,15 @@ pub struct PairingApp {
     updater: Arc<crate::updater::Updater>,
 }
 
+fn exit_with_probe(code: i32, _source: &'static str) -> ! {
+    #[cfg(all(windows, feature = "perf-probe"))]
+    if let Some(probe) = crate::perf_probe::active() {
+        probe.record("before_process_exit", Some(_source), None, None, None, None);
+        let _ = probe.finalize();
+    }
+    std::process::exit(code)
+}
+
 impl PairingApp {
     pub fn new(cc: &eframe::CreationContext<'_>, state: Arc<AppState>) -> Self {
         install_fonts(&cc.egui_ctx);
@@ -256,16 +279,48 @@ impl PairingApp {
         let hwnd = Arc::new(AtomicIsize::new(0));
         #[cfg(windows)]
         let show_id = mi_show.id().clone();
+        #[cfg(windows)]
+        let quit_id = mi_quit.id().clone();
         let (menu_tx, menu_rx) = std::sync::mpsc::channel();
         let wake = cc.egui_ctx.clone();
         #[cfg(windows)]
         let hwnd_menu = Arc::clone(&hwnd);
         MenuEvent::set_event_handler(Some(move |ev: MenuEvent| {
             #[cfg(windows)]
+            let is_quit = ev.id == quit_id;
+            #[cfg(windows)]
+            if is_quit {
+                #[cfg(feature = "perf-probe")]
+                if let Some(probe) = crate::perf_probe::active() {
+                    probe.record(
+                        "tray_exit_callback",
+                        Some("menu_event_handler"),
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+            }
+            #[cfg(windows)]
             if ev.id == show_id {
                 reveal_pairing_window(&hwnd_menu);
             }
-            let _ = menu_tx.send(ev);
+            let send_failed = menu_tx.send(ev).is_err();
+            #[cfg(windows)]
+            if is_quit && send_failed {
+                #[cfg(feature = "perf-probe")]
+                if let Some(probe) = crate::perf_probe::active() {
+                    probe.record(
+                        "tray_exit_callback_send_failed",
+                        Some("menu_channel"),
+                        Some("receiver_closed"),
+                        None,
+                        None,
+                        None,
+                    );
+                }
+            }
             wake.request_repaint();
         }));
         #[cfg(windows)]
@@ -410,7 +465,18 @@ impl PairingApp {
                 if crate::elevation::publish_ready(win.hwnd.get()).is_err() {
                     crate::elevation::note_startup_failure("ready verification failed", "");
                     crate::handle::stop_input();
-                    std::process::exit(1);
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = crate::perf_probe::active() {
+                        probe.record(
+                            "stop_input_done",
+                            Some("ready_publish_failure"),
+                            None,
+                            None,
+                            None,
+                            None,
+                        );
+                    }
+                    exit_with_probe(1, "ready_publish_failure");
                 }
                 self.ready_published = true;
             }
@@ -453,16 +519,33 @@ impl PairingApp {
             } else if ev.id == self.mi_logs.id() {
                 crate::logutil::open_dir();
             } else if ev.id == self.mi_quit.id() {
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let Some(probe) = crate::perf_probe::active() {
+                    probe.record("poll_tray_exit", Some("poll_tray"), None, None, None, None);
+                }
                 self.quit = true;
                 #[cfg(windows)]
-                crate::handle::stop_input();
+                {
+                    crate::handle::stop_input();
+                    #[cfg(feature = "perf-probe")]
+                    if let Some(probe) = crate::perf_probe::active() {
+                        probe.record(
+                            "stop_input_done",
+                            Some("tray_quit_handler"),
+                            None,
+                            None,
+                            None,
+                            None,
+                        );
+                    }
+                }
                 crate::logutil::write("quit from tray");
                 ctx.request_repaint();
                 // Hidden pairing window: Viewport Close is often ignored once on
                 // Windows (event loop keeps running until a second quit). Exit
                 // directly when already in tray-only mode.
                 if self.hidden {
-                    std::process::exit(0);
+                    exit_with_probe(0, "hidden_tray_quit");
                 }
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -1611,7 +1694,7 @@ impl PairingApp {
         } else {
             (
                 "关闭管理员模式",
-                "如果切换的话，手机上需要重新配对。\n确认后将请求一次系统授权，下次启动恢复普通权限。",
+                "如果切换的话，手机上需要重新配对。\n确认后将停止管理员实例、清理管理员任务，并以普通权限重新打开程序。",
             )
         };
         let screen = ctx.content_rect();
@@ -1701,10 +1784,28 @@ impl PairingApp {
             }
         }
         if !on {
-            elevation::remove_task();
+            if let Err(reason) = elevation::begin_disable_admin() {
+                elevation::note_handoff_failure(&reason);
+                crate::logutil::write("admin disable handoff failed");
+                self.run_as_admin = elevation::enabled();
+                return;
+            }
+            crate::handle::stop_input();
+            #[cfg(all(windows, feature = "perf-probe"))]
+            if let Some(probe) = crate::perf_probe::active() {
+                probe.record(
+                    "stop_input_done",
+                    Some("admin_mode_switch"),
+                    None,
+                    None,
+                    None,
+                    None,
+                );
+            }
+            exit_with_probe(0, "admin_mode_switch");
         }
-        // 开关跟着受保护目录里的标记走。取消 UAC 时标记还在，开关保持打开。
-        self.run_as_admin = if on { true } else { elevation::enabled() };
+        // 取消 UAC 时受保护标记仍在，开关保持打开。
+        self.run_as_admin = true;
         // 撤掉用户 Startup 里的旧项（管理员模式下由登录触发接管）；提权进程里这是空操作。
         crate::autostart::apply();
         self.autostart_enabled = crate::autostart::enabled();
@@ -1713,7 +1814,18 @@ impl PairingApp {
             // schtasks /Run 成功只代表任务已排队，不能在这里直接退出。
             if elevation::spawn_unelevated_handoff() {
                 crate::handle::stop_input();
-                std::process::exit(0);
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let Some(probe) = crate::perf_probe::active() {
+                    probe.record(
+                        "stop_input_done",
+                        Some("admin_mode_handoff"),
+                        None,
+                        None,
+                        None,
+                        None,
+                    );
+                }
+                exit_with_probe(0, "admin_mode_handoff");
             }
             elevation::note_handoff_failure("无法重新打开窗口");
             crate::logutil::write("admin handoff spawn failed");

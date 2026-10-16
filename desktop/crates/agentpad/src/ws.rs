@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
@@ -41,7 +41,9 @@ pub struct AppState {
     pub identity: Identity,
     secret: Mutex<String>,
     pub pairing: Mutex<Pairing>,
-    pub paused: AtomicBool,
+    pub paused: Arc<AtomicBool>,
+    input_generation: Arc<AtomicU64>,
+    next_input_source: AtomicU64,
     pub clients: Mutex<Vec<mpsc::UnboundedSender<OutMsg>>>,
     /// 还没完成首条认证的连接。认证结束就释放，长连接不占名额。
     unauth: Mutex<UnauthSlots>,
@@ -53,7 +55,9 @@ impl AppState {
             secret: Mutex::new(identity.secret.clone()),
             identity,
             pairing: Mutex::new(Pairing::default()),
-            paused: AtomicBool::new(false),
+            paused: Arc::new(AtomicBool::new(false)),
+            input_generation: Arc::new(AtomicU64::new(0)),
+            next_input_source: AtomicU64::new(1),
             clients: Mutex::new(Vec::new()),
             unauth: Mutex::new(UnauthSlots::default()),
         })
@@ -115,12 +119,36 @@ impl AppState {
     }
 
     pub fn set_paused(&self, paused: bool) {
-        self.paused.store(paused, Ordering::SeqCst);
+        let was_paused = self.paused.load(Ordering::SeqCst);
+        if paused {
+            self.paused.store(true, Ordering::SeqCst);
+            if !was_paused {
+                self.input_generation.fetch_add(1, Ordering::SeqCst);
+            }
+            enqueue_pointer_command(PointerCommand::Pause {
+                epoch: self.input_epoch(),
+            });
+        } else if was_paused {
+            self.input_generation.fetch_add(1, Ordering::SeqCst);
+            self.paused.store(false, Ordering::SeqCst);
+        }
         let msg = OutMsg::SyncState {
             sync_enabled: !paused,
         };
         let mut clients = self.clients.lock().unwrap();
         clients.retain(|tx| tx.send(msg.clone()).is_ok());
+    }
+
+    fn input_epoch(&self) -> InputEpoch {
+        InputEpoch {
+            paused: Arc::clone(&self.paused),
+            generation: Arc::clone(&self.input_generation),
+            observed: self.input_generation.load(Ordering::SeqCst),
+        }
+    }
+
+    fn next_input_source(&self) -> u64 {
+        self.next_input_source.fetch_add(1, Ordering::Relaxed)
     }
 }
 
@@ -213,45 +241,474 @@ fn enable_pointer_tcp(stream: &TcpStream) {
     let _ = stream.set_nodelay(true);
 }
 
-fn enqueue_pointer(actions: Vec<handle::Action>) {
-    #[cfg(test)]
-    if let Some(tx) = pointer_capture().lock().unwrap().as_ref().cloned() {
-        let _ = tx.send(actions);
-        return;
+#[derive(Clone)]
+struct InputEpoch {
+    paused: Arc<AtomicBool>,
+    generation: Arc<AtomicU64>,
+    observed: u64,
+}
+
+impl InputEpoch {
+    fn active(&self) -> bool {
+        !self.paused.load(Ordering::SeqCst)
+            && self.generation.load(Ordering::SeqCst) == self.observed
     }
-    static TX: std::sync::OnceLock<std::sync::mpsc::Sender<Vec<handle::Action>>> =
+
+    fn same(&self, other: &Self) -> bool {
+        self.observed == other.observed && self.same_owner(other)
+    }
+
+    fn same_owner(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.paused, &other.paused) && Arc::ptr_eq(&self.generation, &other.generation)
+    }
+}
+
+enum PointerCommand {
+    Actions {
+        epoch: InputEpoch,
+        source: u64,
+        actions: Vec<handle::Action>,
+    },
+    ReleaseSource {
+        epoch: InputEpoch,
+        source: u64,
+    },
+    Pause {
+        epoch: InputEpoch,
+    },
+}
+
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(all(windows, feature = "perf-probe")), allow(dead_code))]
+pub(crate) struct QueueStamp {
+    pub(crate) command_id: u64,
+    pub(crate) enqueued_qpc: i64,
+}
+
+#[cfg(all(windows, feature = "perf-probe"))]
+impl PointerCommand {
+    fn queue_kind(&self) -> &'static str {
+        match self {
+            Self::Actions { .. } => "actions",
+            Self::ReleaseSource { .. } => "release_source",
+            Self::Pause { .. } => "pause",
+        }
+    }
+}
+
+#[cfg(all(windows, feature = "perf-probe"))]
+struct QueueEnvelope {
+    command: PointerCommand,
+    stamp: Option<QueueStamp>,
+}
+
+#[cfg(not(all(windows, feature = "perf-probe")))]
+type QueueEnvelope = PointerCommand;
+
+struct QueueWork {
+    command: PointerCommand,
+    stamp: Option<QueueStamp>,
+}
+
+trait IntoQueueWork {
+    fn into_queue_work(self) -> QueueWork;
+}
+
+impl IntoQueueWork for PointerCommand {
+    fn into_queue_work(self) -> QueueWork {
+        QueueWork {
+            command: self,
+            stamp: None,
+        }
+    }
+}
+
+#[cfg(all(windows, feature = "perf-probe"))]
+impl IntoQueueWork for QueueEnvelope {
+    fn into_queue_work(self) -> QueueWork {
+        QueueWork {
+            command: self.command,
+            stamp: self.stamp,
+        }
+    }
+}
+
+fn enqueue_pointer(actions: Vec<handle::Action>, epoch: InputEpoch, source: u64) {
+    enqueue_pointer_command(PointerCommand::Actions {
+        epoch,
+        source,
+        actions,
+    });
+}
+
+fn enqueue_pointer_command(command: PointerCommand) {
+    #[cfg(test)]
+    {
+        let mut capture = pointer_capture().lock().unwrap();
+        if let Some(capture) = capture.as_mut() {
+            let epoch = match &command {
+                PointerCommand::Actions { epoch, .. }
+                | PointerCommand::ReleaseSource { epoch, .. }
+                | PointerCommand::Pause { epoch } => epoch,
+            };
+            let matches_capture = match (&capture.paused, &capture.generation) {
+                (Some(paused), Some(generation)) => {
+                    Arc::ptr_eq(paused, &epoch.paused) && Arc::ptr_eq(generation, &epoch.generation)
+                }
+                (None, None) => match &command {
+                    PointerCommand::Actions { .. } | PointerCommand::ReleaseSource { .. } => {
+                        capture.paused = Some(Arc::clone(&epoch.paused));
+                        capture.generation = Some(Arc::clone(&epoch.generation));
+                        true
+                    }
+                    PointerCommand::Pause { .. } => false,
+                },
+                _ => false,
+            };
+            if matches_capture {
+                let _ = capture.tx.send(command);
+                return;
+            }
+        }
+    }
+    static TX: std::sync::OnceLock<std::sync::mpsc::Sender<QueueEnvelope>> =
         std::sync::OnceLock::new();
     let tx = TX.get_or_init(|| {
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<handle::Action>>();
+        let (tx, rx) = std::sync::mpsc::channel::<QueueEnvelope>();
         std::thread::Builder::new()
             .name("agentpad-inject".into())
             .spawn(move || run_pointer_queue(rx, handle::apply_actions))
             .expect("inject thread");
         tx
     });
-    let _ = tx.send(actions);
+    enqueue_to_pointer_queue(tx, command);
+}
+
+#[cfg(all(windows, feature = "perf-probe"))]
+fn enqueue_to_pointer_queue(tx: &std::sync::mpsc::Sender<QueueEnvelope>, command: PointerCommand) {
+    enqueue_to_pointer_queue_with_probe(tx, command, crate::perf_probe::active());
+}
+
+#[cfg(all(windows, feature = "perf-probe"))]
+fn enqueue_to_pointer_queue_with_probe(
+    tx: &std::sync::mpsc::Sender<QueueEnvelope>,
+    command: PointerCommand,
+    probe: Option<&crate::perf_probe::Probe>,
+) {
+    if let Some(probe) = probe {
+        let kind = command.queue_kind();
+        probe.enqueue_command(kind, |stamp| {
+            tx.send(QueueEnvelope {
+                command,
+                stamp: Some(stamp),
+            })
+            .is_ok()
+        });
+    } else {
+        let _ = tx.send(QueueEnvelope {
+            command,
+            stamp: None,
+        });
+    }
+}
+
+#[cfg(not(all(windows, feature = "perf-probe")))]
+fn enqueue_to_pointer_queue(tx: &std::sync::mpsc::Sender<QueueEnvelope>, command: PointerCommand) {
+    let _ = tx.send(command);
 }
 
 #[cfg(test)]
-fn pointer_capture() -> &'static Mutex<Option<std::sync::mpsc::Sender<Vec<handle::Action>>>> {
-    static SLOT: std::sync::OnceLock<Mutex<Option<std::sync::mpsc::Sender<Vec<handle::Action>>>>> =
+struct PointerCaptureSlot {
+    tx: std::sync::mpsc::Sender<PointerCommand>,
+    paused: Option<Arc<AtomicBool>>,
+    generation: Option<Arc<AtomicU64>>,
+}
+
+#[cfg(test)]
+fn pointer_capture() -> &'static Mutex<Option<PointerCaptureSlot>> {
+    static SLOT: std::sync::OnceLock<Mutex<Option<PointerCaptureSlot>>> =
         std::sync::OnceLock::new();
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
-fn run_pointer_queue(
-    rx: std::sync::mpsc::Receiver<Vec<handle::Action>>,
+fn run_pointer_queue<T: IntoQueueWork>(
+    rx: std::sync::mpsc::Receiver<T>,
     mut apply: impl FnMut(&[handle::Action]),
 ) {
+    #[cfg(all(windows, feature = "perf-probe"))]
+    let probe = crate::perf_probe::active();
+    #[cfg(not(all(windows, feature = "perf-probe")))]
+    let probe = ();
+    run_pointer_queue_inner(rx, &mut apply, probe);
+}
+
+#[cfg(all(test, windows, feature = "perf-probe"))]
+fn run_pointer_queue_with_probe<T: IntoQueueWork>(
+    rx: std::sync::mpsc::Receiver<T>,
+    mut apply: impl FnMut(&[handle::Action]),
+    probe: &crate::perf_probe::Probe,
+) {
+    run_pointer_queue_inner(rx, &mut apply, Some(probe));
+}
+
+fn run_pointer_queue_inner<T: IntoQueueWork>(
+    rx: std::sync::mpsc::Receiver<T>,
+    apply: &mut impl FnMut(&[handle::Action]),
+    #[cfg(all(windows, feature = "perf-probe"))] probe: Option<&crate::perf_probe::Probe>,
+    #[cfg(not(all(windows, feature = "perf-probe")))] _probe: (),
+) {
     let mut buttons_before_batch = 0;
-    while let Ok(mut batch) = rx.recv() {
-        while let Ok(more) = rx.try_recv() {
-            merge_pointer_batch(&mut batch, more, buttons_before_batch);
+    let mut buttons_source = None;
+    let mut buttons_epoch: Option<InputEpoch> = None;
+    let mut pending = None;
+    loop {
+        let work = match pending.take() {
+            Some(work) => work,
+            None => match rx.recv() {
+                Ok(command) => claim_queue_work(
+                    command,
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    probe,
+                ),
+                Err(_) => {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.queue_closed();
+                    }
+                    break;
+                }
+            },
+        };
+        let QueueWork { command, stamp } = work;
+        match command {
+            PointerCommand::Pause { epoch } => {
+                let held_before_pause = buttons_epoch
+                    .as_ref()
+                    .is_some_and(|held| held.same_owner(&epoch) && held.observed < epoch.observed);
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let (Some(probe), Some(stamp)) = (probe, stamp) {
+                    probe.branch_processed(
+                        stamp,
+                        "pause",
+                        if buttons_before_batch != 0 && held_before_pause {
+                            "released_held_buttons"
+                        } else {
+                            "no_held_buttons"
+                        },
+                    );
+                }
+                if buttons_before_batch != 0 && held_before_pause {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.apply_started(
+                            stamp,
+                            stamp.map(|item| item.command_id),
+                            "pause_release",
+                            1,
+                            stamp.map(|item| item.enqueued_qpc),
+                        );
+                    }
+                    apply(&[released_pointer()]);
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.apply_finished(
+                            stamp,
+                            stamp.map(|item| item.command_id),
+                            "pause_release",
+                            1,
+                            stamp.map(|item| item.enqueued_qpc),
+                        );
+                    }
+                    buttons_before_batch = 0;
+                    buttons_source = None;
+                    buttons_epoch = None;
+                } else {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.command_completed(stamp, "pause", "no_held_buttons");
+                    }
+                }
+            }
+            PointerCommand::ReleaseSource { epoch, source } => {
+                let source_owns_buttons = buttons_epoch
+                    .as_ref()
+                    .is_some_and(|held| held.same_owner(&epoch));
+                let should_release = epoch.active()
+                    && buttons_before_batch != 0
+                    && buttons_source == Some(source)
+                    && source_owns_buttons;
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let (Some(probe), Some(stamp)) = (probe, stamp) {
+                    probe.branch_processed(
+                        stamp,
+                        "release_source",
+                        if should_release {
+                            "released_held_buttons"
+                        } else {
+                            "no_owned_buttons"
+                        },
+                    );
+                }
+                if should_release {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.apply_started(
+                            stamp,
+                            stamp.map(|item| item.command_id),
+                            "source_release",
+                            1,
+                            stamp.map(|item| item.enqueued_qpc),
+                        );
+                    }
+                    apply(&[released_pointer()]);
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.apply_finished(
+                            stamp,
+                            stamp.map(|item| item.command_id),
+                            "source_release",
+                            1,
+                            stamp.map(|item| item.enqueued_qpc),
+                        );
+                    }
+                    buttons_before_batch = 0;
+                    buttons_source = None;
+                    buttons_epoch = None;
+                } else {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.command_completed(stamp, "release_source", "no_owned_buttons");
+                    }
+                }
+            }
+            PointerCommand::Actions {
+                epoch,
+                source,
+                mut actions,
+            } => {
+                if !epoch.active() {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let (Some(probe), Some(stamp)) = (probe, stamp) {
+                        probe.command_dropped(stamp, "stale_epoch");
+                    }
+                    continue;
+                }
+                #[cfg(all(windows, feature = "perf-probe"))]
+                let batch_id = stamp.map(|item| item.command_id);
+                let mut oldest_enqueue_qpc = stamp.map(|item| item.enqueued_qpc);
+                #[cfg(all(windows, feature = "perf-probe"))]
+                let mut batch_command_count = 1;
+                while let Ok(more) = rx.try_recv() {
+                    let more = claim_queue_work(
+                        more,
+                        #[cfg(all(windows, feature = "perf-probe"))]
+                        probe,
+                    );
+                    let QueueWork {
+                        command: more_command,
+                        stamp: more_stamp,
+                    } = more;
+                    match more_command {
+                        PointerCommand::Actions {
+                            epoch: more_epoch,
+                            source: more_source,
+                            actions: more_actions,
+                        } if source == more_source
+                            && epoch.same(&more_epoch)
+                            && more_epoch.active() =>
+                        {
+                            #[cfg(all(windows, feature = "perf-probe"))]
+                            {
+                                batch_command_count += 1;
+                            }
+                            if let Some(more_stamp) = more_stamp {
+                                oldest_enqueue_qpc = Some(
+                                    oldest_enqueue_qpc.map_or(more_stamp.enqueued_qpc, |oldest| {
+                                        oldest.min(more_stamp.enqueued_qpc)
+                                    }),
+                                );
+                                #[cfg(all(windows, feature = "perf-probe"))]
+                                if let (Some(probe), Some(batch_id)) = (probe, batch_id) {
+                                    probe.command_merged(more_stamp, batch_id, batch_command_count);
+                                }
+                            }
+                            merge_pointer_batch(&mut actions, more_actions, buttons_before_batch);
+                        }
+                        other => {
+                            #[cfg(all(windows, feature = "perf-probe"))]
+                            if let (Some(probe), Some(more_stamp)) = (probe, more_stamp) {
+                                probe.command_pending(more_stamp, "lookahead_barrier");
+                            }
+                            pending = Some(QueueWork {
+                                command: other,
+                                stamp: more_stamp,
+                            });
+                            break;
+                        }
+                    }
+                }
+                if !epoch.active() {
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if let Some(probe) = probe {
+                        probe.batch_dropped(
+                            stamp,
+                            batch_id,
+                            batch_command_count,
+                            "stale_epoch_during_lookahead",
+                            oldest_enqueue_qpc,
+                        );
+                    }
+                    continue;
+                }
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let Some(probe) = probe {
+                    probe.apply_started(
+                        stamp,
+                        batch_id,
+                        "actions",
+                        batch_command_count,
+                        oldest_enqueue_qpc,
+                    );
+                }
+                apply(&actions);
+                #[cfg(all(windows, feature = "perf-probe"))]
+                if let Some(probe) = probe {
+                    probe.apply_finished(
+                        stamp,
+                        batch_id,
+                        "actions",
+                        batch_command_count,
+                        oldest_enqueue_qpc,
+                    );
+                }
+                if let Some(handle::Action::Pointer { buttons, .. }) = actions.last() {
+                    buttons_before_batch = *buttons;
+                    buttons_source = (*buttons != 0).then_some(source);
+                    buttons_epoch = (*buttons != 0).then(|| epoch.clone());
+                }
+            }
         }
-        apply(&batch);
-        if let Some(handle::Action::Pointer { buttons, .. }) = batch.last() {
-            buttons_before_batch = *buttons;
-        }
+    }
+}
+
+fn claim_queue_work<T: IntoQueueWork>(
+    command: T,
+    #[cfg(all(windows, feature = "perf-probe"))] probe: Option<&crate::perf_probe::Probe>,
+) -> QueueWork {
+    let work = command.into_queue_work();
+    #[cfg(all(windows, feature = "perf-probe"))]
+    if let (Some(probe), Some(stamp)) = (probe, work.stamp) {
+        probe.command_claimed(stamp);
+    }
+    work
+}
+
+fn released_pointer() -> handle::Action {
+    handle::Action::Pointer {
+        dx: 0.0,
+        dy: 0.0,
+        buttons: 0,
+        wheel: 0,
     }
 }
 
@@ -379,6 +836,7 @@ async fn handle_socket(
 
     let (mut sink, mut source) = ws.split();
     let mut conn = Conn::default();
+    let input_source = state.next_input_source();
     // 内层 future 吸收读写上的 `?`，无论 break、出错还是被重置密钥踢掉，外层都先抬起按键。
     let session = async {
         loop {
@@ -395,16 +853,25 @@ async fn handle_socket(
                         crate::logutil::write("message parse failed");
                         continue;
                     };
+                    let pointer = matches!(msg, InMsg::Pointer { .. });
+                    #[cfg(all(windows, feature = "perf-probe"))]
+                    if pointer {
+                        if let Some(probe) = crate::perf_probe::active() {
+                            probe.phone_pointer_received();
+                        }
+                    }
+                    let epoch = state.input_epoch();
                     let paused = state.paused.load(Ordering::SeqCst);
                     crate::logutil::operation(crate::logutil::input_category(&msg), false, !paused || matches!(msg, InMsg::Hello { .. } | InMsg::Ping));
-                    let pointer = matches!(msg, InMsg::Pointer { .. });
                     let (replies, actions) = handle::handle(paused, state.sync_enabled(), &mut conn, msg);
                     if !actions.is_empty() {
                         if actions
                             .iter()
                             .all(|a| matches!(a, handle::Action::Pointer { .. }))
                         {
-                            enqueue_pointer(actions);
+                            if !paused {
+                                enqueue_pointer(actions, epoch, input_source);
+                            }
                         } else {
                             tokio::task::block_in_place(|| handle::apply_actions(&actions));
                         }
@@ -421,8 +888,11 @@ async fn handle_socket(
         Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
     }
     .await;
-    if let Some(action) = handle::release_stuck_pointer(&mut conn) {
-        enqueue_pointer(vec![action]);
+    if handle::release_stuck_pointer(&mut conn).is_some() {
+        enqueue_pointer_command(PointerCommand::ReleaseSource {
+            epoch: state.input_epoch(),
+            source: input_source,
+        });
     }
     session?;
     crate::logutil::write("connection session closed");
@@ -572,20 +1042,180 @@ mod tests {
             });
         });
         let timeout = std::time::Duration::from_secs(5);
-        tx.send(vec![pointer(0.0, 1, 0)]).unwrap();
+        let epoch = test_epoch();
+        tx.send(actions_command(&epoch, 1, vec![pointer(0.0, 1, 0)]))
+            .unwrap();
         assert_eq!(
             observed_rx.recv_timeout(timeout).unwrap(),
             vec![pointer(0.0, 1, 0)]
         );
-        tx.send(vec![pointer(0.0, 0, 0)]).unwrap();
-        tx.send(vec![pointer(4.0, 0, 1)]).unwrap();
-        tx.send(vec![pointer(2.0, 0, 2)]).unwrap();
+        tx.send(actions_command(&epoch, 1, vec![pointer(0.0, 0, 0)]))
+            .unwrap();
+        tx.send(actions_command(&epoch, 1, vec![pointer(4.0, 0, 1)]))
+            .unwrap();
+        tx.send(actions_command(&epoch, 1, vec![pointer(2.0, 0, 2)]))
+            .unwrap();
         drop(tx);
         resume_tx.send(()).unwrap();
         assert_eq!(
             observed_rx.recv_timeout(timeout).unwrap(),
             vec![pointer(0.0, 0, 0), pointer(6.0, 0, 3)]
         );
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn pause_releases_once_and_drops_queued_downs_from_every_connection() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let (resume_tx, resume_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            let mut applied_count = 0;
+            run_pointer_queue(rx, |batch| {
+                observed_tx.send(batch.to_vec()).unwrap();
+                applied_count += 1;
+                if applied_count == 2 {
+                    resume_rx.recv().unwrap();
+                }
+            });
+        });
+        let timeout = std::time::Duration::from_secs(5);
+        let epoch = test_epoch();
+        let first_down = pointer(1.0, 1, 0);
+        let second_down = pointer(2.0, 2, 0);
+        tx.send(actions_command(&epoch, 1, vec![first_down.clone()]))
+            .unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(timeout).unwrap(),
+            vec![first_down.clone()]
+        );
+        tx.send(actions_command(&epoch, 2, vec![second_down.clone()]))
+            .unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(timeout).unwrap(),
+            vec![second_down.clone()]
+        );
+
+        tx.send(actions_command(&epoch, 3, vec![pointer(3.0, 1, 0)]))
+            .unwrap();
+        epoch.paused.store(true, Ordering::SeqCst);
+        epoch.generation.fetch_add(1, Ordering::SeqCst);
+        let pause_epoch = InputEpoch {
+            observed: 1,
+            ..epoch.clone()
+        };
+        tx.send(PointerCommand::Pause {
+            epoch: pause_epoch.clone(),
+        })
+        .unwrap();
+        tx.send(PointerCommand::Pause { epoch: pause_epoch })
+            .unwrap();
+        epoch.generation.fetch_add(1, Ordering::SeqCst);
+        epoch.paused.store(false, Ordering::SeqCst);
+        let resumed = InputEpoch {
+            observed: 2,
+            ..epoch.clone()
+        };
+        let resumed_down = pointer(4.0, 1, 0);
+        tx.send(actions_command(&resumed, 2, vec![resumed_down.clone()]))
+            .unwrap();
+        drop(tx);
+        resume_tx.send(()).unwrap();
+
+        let mut applied = vec![first_down, second_down];
+        while let Ok(batch) = observed_rx.recv_timeout(timeout) {
+            applied.extend(batch);
+        }
+        worker.join().unwrap();
+        assert_eq!(
+            applied,
+            vec![
+                pointer(1.0, 1, 0),
+                pointer(2.0, 2, 0),
+                button_up(),
+                resumed_down,
+            ]
+        );
+    }
+
+    #[test]
+    fn pause_only_releases_buttons_owned_by_its_app_state() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            run_pointer_queue(rx, |batch| {
+                observed_tx.send(batch.to_vec()).unwrap();
+            });
+        });
+        let timeout = std::time::Duration::from_secs(5);
+        let held_epoch = test_epoch();
+        let first_down = pointer(1.0, 1, 0);
+        tx.send(actions_command(&held_epoch, 7, vec![first_down.clone()]))
+            .unwrap();
+        assert_eq!(observed_rx.recv_timeout(timeout).unwrap(), vec![first_down]);
+
+        let unrelated = test_epoch();
+        unrelated.generation.fetch_add(1, Ordering::SeqCst);
+        tx.send(PointerCommand::Pause { epoch: unrelated }).unwrap();
+        assert!(observed_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err());
+
+        held_epoch.generation.fetch_add(1, Ordering::SeqCst);
+        let matching_pause = InputEpoch {
+            observed: 1,
+            ..held_epoch
+        };
+        tx.send(PointerCommand::Pause {
+            epoch: matching_pause,
+        })
+        .unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(timeout).unwrap(),
+            vec![button_up()]
+        );
+        drop(tx);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn disconnect_release_only_releases_the_connection_that_holds_buttons() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let (observed_tx, observed_rx) = std::sync::mpsc::channel();
+        let worker = std::thread::spawn(move || {
+            run_pointer_queue(rx, |batch| {
+                observed_tx.send(batch.to_vec()).unwrap();
+            });
+        });
+        let timeout = std::time::Duration::from_secs(5);
+        let epoch = test_epoch();
+        let first_down = pointer(1.0, 1, 0);
+        let second_down = pointer(2.0, 2, 0);
+        tx.send(actions_command(&epoch, 1, vec![first_down.clone()]))
+            .unwrap();
+        assert_eq!(observed_rx.recv_timeout(timeout).unwrap(), vec![first_down]);
+        tx.send(actions_command(&epoch, 2, vec![second_down.clone()]))
+            .unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(timeout).unwrap(),
+            vec![second_down]
+        );
+
+        tx.send(PointerCommand::ReleaseSource {
+            epoch: epoch.clone(),
+            source: 1,
+        })
+        .unwrap();
+        assert!(observed_rx
+            .recv_timeout(std::time::Duration::from_millis(100))
+            .is_err());
+        tx.send(PointerCommand::ReleaseSource { epoch, source: 2 })
+            .unwrap();
+        assert_eq!(
+            observed_rx.recv_timeout(timeout).unwrap(),
+            vec![button_up()]
+        );
+        drop(tx);
         worker.join().unwrap();
     }
 
@@ -1050,13 +1680,236 @@ mod tests {
         }
     }
 
+    fn test_epoch() -> InputEpoch {
+        InputEpoch {
+            paused: Arc::new(AtomicBool::new(false)),
+            generation: Arc::new(AtomicU64::new(0)),
+            observed: 0,
+        }
+    }
+
+    fn actions_command(
+        epoch: &InputEpoch,
+        source: u64,
+        actions: Vec<handle::Action>,
+    ) -> PointerCommand {
+        PointerCommand::Actions {
+            epoch: epoch.clone(),
+            source,
+            actions,
+        }
+    }
+
+    #[cfg(all(windows, feature = "perf-probe"))]
+    #[test]
+    fn pointer_probe_counts_concurrent_producers_without_queue_races() {
+        let probe = Arc::new(crate::perf_probe::Probe::for_test(32_768, 32));
+        let (tx, rx) = std::sync::mpsc::channel::<QueueEnvelope>();
+        let worker_probe = Arc::clone(&probe);
+        let worker = std::thread::spawn(move || {
+            run_pointer_queue_with_probe(rx, |_| {}, &worker_probe);
+        });
+
+        let producer_count = 4;
+        let commands_per_producer = 250;
+        let producers = (0..producer_count)
+            .map(|producer| {
+                let tx = tx.clone();
+                let probe = Arc::clone(&probe);
+                std::thread::spawn(move || {
+                    let epoch = test_epoch();
+                    for _ in 0..commands_per_producer {
+                        enqueue_to_pointer_queue_with_probe(
+                            &tx,
+                            PointerCommand::Pause {
+                                epoch: epoch.clone(),
+                            },
+                            Some(&probe),
+                        );
+                    }
+                    producer
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for (expected, producer) in producers.into_iter().enumerate() {
+            assert_eq!(producer.join().unwrap(), expected);
+        }
+        drop(tx);
+        worker.join().unwrap();
+
+        let counters = probe.counters_for_test();
+        let expected = (producer_count * commands_per_producer) as u64;
+        assert_eq!(counters.enqueued, expected);
+        assert_eq!(counters.pause_enqueued, expected);
+        assert_eq!(counters.claimed, expected);
+        assert_eq!(counters.pause_processed, expected);
+        assert_eq!(counters.current_queue_depth, 0);
+        assert_eq!(counters.current_in_flight, 0);
+        assert_eq!(counters.counter_underflow, 0);
+        assert_eq!(counters.queue_closed, 1);
+    }
+
+    #[cfg(all(windows, feature = "perf-probe"))]
+    #[test]
+    fn pointer_probe_counts_merge_pending_release_and_apply_boundaries() {
+        let probe = crate::perf_probe::Probe::for_test(128, 32);
+        let (tx, rx) = std::sync::mpsc::channel::<QueueEnvelope>();
+        let epoch = test_epoch();
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            actions_command(&epoch, 17, vec![pointer(0.0, 1, 0)]),
+            Some(&probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            actions_command(&epoch, 17, vec![pointer(1.0, 1, 0)]),
+            Some(&probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            actions_command(&epoch, 17, vec![pointer(2.0, 1, 0)]),
+            Some(&probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            PointerCommand::ReleaseSource {
+                epoch: epoch.clone(),
+                source: 17,
+            },
+            Some(&probe),
+        );
+
+        let (applied_tx, applied_rx) = std::sync::mpsc::channel();
+        let worker_probe = Arc::new(probe);
+        let probe_for_worker = Arc::clone(&worker_probe);
+        let worker = std::thread::spawn(move || {
+            run_pointer_queue_with_probe(
+                rx,
+                |batch| applied_tx.send(batch.to_vec()).unwrap(),
+                &probe_for_worker,
+            );
+        });
+        drop(tx);
+
+        assert_eq!(
+            applied_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+            vec![pointer(0.0, 1, 0), pointer(3.0, 1, 0)]
+        );
+        assert_eq!(
+            applied_rx
+                .recv_timeout(std::time::Duration::from_secs(5))
+                .unwrap(),
+            vec![button_up()]
+        );
+        worker.join().unwrap();
+
+        let counters = worker_probe.counters_for_test();
+        assert_eq!(counters.enqueued, 4);
+        assert_eq!(counters.claimed, 4);
+        assert_eq!(counters.merged, 2);
+        assert_eq!(counters.pending, 1);
+        assert_eq!(counters.release_processed, 1);
+        assert_eq!(counters.applied_commands, 4);
+        assert_eq!(counters.current_queue_depth, 0);
+        assert_eq!(counters.current_in_flight, 0);
+        assert_eq!(counters.counter_underflow, 0);
+        let event_names = worker_probe.event_names_for_test();
+        for event in [
+            "pointer_command_enqueued",
+            "pointer_command_claimed",
+            "pointer_command_merged",
+            "pointer_command_pending",
+            "pointer_apply_start",
+            "pointer_apply_end",
+            "pointer_release_source_processed",
+            "pointer_queue_closed",
+        ] {
+            assert!(event_names.contains(&event), "missing {event}");
+        }
+    }
+
+    #[cfg(all(windows, feature = "perf-probe"))]
+    #[test]
+    fn pointer_probe_counts_stale_drop_pause_and_each_failed_send_kind() {
+        let probe = crate::perf_probe::Probe::for_test(128, 32);
+        let (tx, rx) = std::sync::mpsc::channel::<QueueEnvelope>();
+        let stale_epoch = test_epoch();
+        let active_epoch = InputEpoch {
+            observed: 1,
+            ..stale_epoch.clone()
+        };
+        stale_epoch.generation.fetch_add(1, Ordering::SeqCst);
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            actions_command(&stale_epoch, 3, vec![pointer(5.0, 1, 0)]),
+            Some(&probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &tx,
+            PointerCommand::Pause {
+                epoch: active_epoch,
+            },
+            Some(&probe),
+        );
+        let worker_probe = Arc::new(probe);
+        let probe_for_worker = Arc::clone(&worker_probe);
+        let worker = std::thread::spawn(move || {
+            run_pointer_queue_with_probe(rx, |_| {}, &probe_for_worker);
+        });
+        drop(tx);
+        worker.join().unwrap();
+
+        let counters = worker_probe.counters_for_test();
+        assert_eq!(counters.dropped, 1);
+        assert_eq!(counters.pause_processed, 1);
+        assert_eq!(counters.claimed, 2);
+        assert_eq!(counters.current_queue_depth, 0);
+        assert_eq!(counters.current_in_flight, 0);
+        assert_eq!(counters.counter_underflow, 0);
+        assert_eq!(counters.queue_closed, 1);
+
+        let failed_probe = crate::perf_probe::Probe::for_test(32, 8);
+        let (failed_tx, failed_rx) = std::sync::mpsc::channel::<QueueEnvelope>();
+        drop(failed_rx);
+        let epoch = test_epoch();
+        enqueue_to_pointer_queue_with_probe(
+            &failed_tx,
+            actions_command(&epoch, 4, vec![pointer(1.0, 0, 0)]),
+            Some(&failed_probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &failed_tx,
+            PointerCommand::ReleaseSource {
+                epoch: epoch.clone(),
+                source: 4,
+            },
+            Some(&failed_probe),
+        );
+        enqueue_to_pointer_queue_with_probe(
+            &failed_tx,
+            PointerCommand::Pause { epoch },
+            Some(&failed_probe),
+        );
+        let failed = failed_probe.counters_for_test();
+        assert_eq!(failed.send_failed, 3);
+        assert_eq!(failed.action_send_failed, 1);
+        assert_eq!(failed.release_send_failed, 1);
+        assert_eq!(failed.pause_send_failed, 1);
+        assert_eq!(failed.current_queue_depth, 0);
+        assert_eq!(failed.current_in_flight, 0);
+        assert_eq!(failed.counter_underflow, 0);
+    }
+
     fn pointer_json(dx: f64, dy: f64, buttons: u8, wheel: i32) -> String {
         format!(r#"{{"type":"pointer","dx":{dx},"dy":{dy},"buttons":{buttons},"wheel":{wheel}}}"#)
     }
 
     /// 把指针动作拦在注入线程外面，测试里不会碰到真的键鼠。
     struct PointerCapture {
-        rx: std::sync::mpsc::Receiver<Vec<handle::Action>>,
+        rx: std::sync::mpsc::Receiver<PointerCommand>,
         _gate: tokio::sync::MutexGuard<'static, ()>,
     }
 
@@ -1068,15 +1921,27 @@ mod tests {
                 .lock()
                 .await;
             let (tx, rx) = std::sync::mpsc::channel();
-            *super::pointer_capture().lock().unwrap() = Some(tx);
+            *super::pointer_capture().lock().unwrap() = Some(super::PointerCaptureSlot {
+                tx,
+                paused: None,
+                generation: None,
+            });
             Self { rx, _gate: gate }
         }
 
-        async fn recv(&self) -> Vec<handle::Action> {
+        fn bind_state(&self, state: &AppState) {
+            let mut capture = super::pointer_capture().lock().unwrap();
+            if let Some(capture) = capture.as_mut() {
+                capture.paused = Some(Arc::clone(&state.paused));
+                capture.generation = Some(Arc::clone(&state.input_generation));
+            }
+        }
+
+        async fn recv_command(&self) -> PointerCommand {
             let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
             loop {
                 match self.rx.try_recv() {
-                    Ok(batch) => return batch,
+                    Ok(command) => return command,
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                         panic!("pointer capture closed")
                     }
@@ -1086,6 +1951,16 @@ mod tests {
                         }
                         tokio::task::yield_now().await;
                     }
+                }
+            }
+        }
+
+        async fn recv(&self) -> Vec<handle::Action> {
+            match self.recv_command().await {
+                PointerCommand::Actions { actions, .. } => actions,
+                PointerCommand::ReleaseSource { .. } => vec![button_up()],
+                PointerCommand::Pause { .. } => {
+                    panic!("pause control is not an injected action")
                 }
             }
         }
@@ -1173,7 +2048,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn pause_forwards_button_up_and_disconnect_does_not_repeat_it() {
+    async fn pause_releases_button_immediately_and_ignores_later_remote_up() {
         let capture = PointerCapture::install().await;
         let state = AppState::new(test_identity());
         let (_addr, mut ws) = authed_client(state.clone()).await;
@@ -1182,6 +2057,10 @@ mod tests {
             .unwrap();
         assert_eq!(capture.recv().await, vec![pointer(1.0, 1, 0)]);
         state.set_paused(true);
+        assert!(matches!(
+            capture.recv_command().await,
+            PointerCommand::Pause { .. }
+        ));
         ws.send(Message::Text(pointer_json(8.0, 9.0, 1, 2).into()))
             .await
             .unwrap();
@@ -1189,7 +2068,7 @@ mod tests {
         ws.send(Message::Text(pointer_json(8.0, 9.0, 0, 4).into()))
             .await
             .unwrap();
-        assert_eq!(capture.recv().await, vec![button_up()]);
+        assert!(capture.quiet(std::time::Duration::from_millis(200)).await);
         drop(ws);
         assert!(capture.quiet(std::time::Duration::from_millis(200)).await);
     }
@@ -1207,7 +2086,9 @@ mod tests {
         state.replace_secret("rotated-secret".into());
         assert_eq!(capture.recv().await, vec![button_up()]);
 
-        let (_addr, mut ws) = authed_client(AppState::new(test_identity())).await;
+        let second_state = AppState::new(test_identity());
+        capture.bind_state(&second_state);
+        let (_addr, mut ws) = authed_client(second_state).await;
         ws.send(Message::Text(pointer_json(2.0, 0.0, 5, 0).into()))
             .await
             .unwrap();
@@ -1232,10 +2113,13 @@ mod tests {
                 seen_tx.send(batch.to_vec()).unwrap();
             });
         });
+        let epoch = test_epoch();
         let down = pointer(4.0, 1, 0);
         let up = button_up();
-        tx.send(vec![down.clone()]).unwrap();
-        tx.send(vec![up.clone()]).unwrap();
+        tx.send(actions_command(&epoch, 1, vec![down.clone()]))
+            .unwrap();
+        tx.send(actions_command(&epoch, 1, vec![up.clone()]))
+            .unwrap();
         drop(tx);
         let mut applied = Vec::new();
         while let Ok(batch) = seen_rx.recv_timeout(std::time::Duration::from_secs(2)) {

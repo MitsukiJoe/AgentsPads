@@ -51,9 +51,7 @@ class MainActivity : FlutterActivity() {
 
     override fun onCreate(savedInstanceState: android.os.Bundle?) {
         super.onCreate(savedInstanceState)
-        if (savedInstanceState == null) {
-            runCatching { LauncherIcon.onColdStart(this) }
-        }
+        runCatching { LauncherIcon.onColdStart(this) }
         inputView = BackspaceFlutterView(this) { ws?.emitInputBackspace() }.also { view ->
             view.id = FLUTTER_VIEW_ID
             view.addOnFirstFrameRenderedListener(object : FlutterUiDisplayListener {
@@ -186,6 +184,37 @@ class MainActivity : FlutterActivity() {
     }
 }
 
+class LauncherTrampolineActivity : android.app.Activity() {
+    override fun onCreate(savedInstanceState: android.os.Bundle?) {
+        super.onCreate(savedInstanceState)
+
+        val mainTask = getSystemService(android.app.ActivityManager::class.java)
+            .appTasks
+            .firstOrNull { task ->
+                task.taskInfo.id != taskId &&
+                    (task.taskInfo.baseActivity?.className == MainActivity::class.java.name ||
+                        task.taskInfo.topActivity?.className == MainActivity::class.java.name)
+            }
+        val returnedToExistingTask = mainTask?.let {
+            runCatching { it.moveToFront() }.isSuccess
+        } == true
+
+        if (!returnedToExistingTask) {
+            runCatching {
+                startActivity(
+                    Intent(this, MainActivity::class.java).addFlags(
+                        Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK,
+                    ),
+                )
+                overridePendingTransition(0, 0)
+            }
+        }
+
+        finishAndRemoveTask()
+        overridePendingTransition(0, 0)
+    }
+}
+
 class VoiceRecordingTracker(ctx: Context) {
     private val tracker = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
         VoiceRecordingTracker24(ctx)
@@ -278,10 +307,12 @@ class WifiWs(
     private val voiceRecording: VoiceRecordingTracker,
 ) : EventChannel.StreamHandler {
     private var visible = false
+    private val debugAuthObserverEnabled =
+        (ctx.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0
     private val methodChannel = MethodChannel(engine.dartExecutor.binaryMessenger, "agentpad/ws")
     private val eventChannel = EventChannel(engine.dartExecutor.binaryMessenger, "agentpad/ws_events")
     private val sockets = ConcurrentHashMap<String, WebSocket>()
-    private val pointer = PointerPump(sockets)
+    private val pointer = PointerPump(sockets, probe = PerfProbe)
     private var events: EventChannel.EventSink? = null
     private val main = Handler(Looper.getMainLooper())
     private val wifiLock: WifiManager.WifiLock? = runCatching { newWifiLock() }.getOrNull()
@@ -293,6 +324,8 @@ class WifiWs(
         }.getOrNull()
 
     init {
+        PerfProbe.attach(pointer, sockets)
+        PerfProbe.refreshEnabled(ctx)
         methodChannel.setMethodCallHandler { call, result ->
                 when (call.method) {
                     "diagnosticEnabled" -> result.success(DiagnosticLog.enabled)
@@ -344,7 +377,10 @@ class WifiWs(
                     "close" -> {
                         val id = call.argument<String>("id") ?: ""
                         pointer.drop(id)
-                        sockets.remove(id)?.cancel()
+                        sockets.remove(id)?.let { oldSocket ->
+                            PerfProbe.connectionEnded(id, oldSocket, "app_close")
+                            oldSocket.cancel()
+                        }
                         releaseWifiIfIdle()
                         result.success(true)
                     }
@@ -414,6 +450,7 @@ class WifiWs(
         for ((id, socket) in sockets) {
             if (sockets.remove(id, socket)) {
                 pointer.drop(id)
+                PerfProbe.connectionEnded(id, socket, "hidden")
                 socket.cancel()
                 emit(id, "close")
             }
@@ -451,7 +488,10 @@ class WifiWs(
             return
         }
         pointer.drop(id)
-        sockets.remove(id)?.cancel()
+        sockets.remove(id)?.let { oldSocket ->
+            PerfProbe.connectionEnded(id, oldSocket, "replaced")
+            oldSocket.cancel()
+        }
         val settled = AtomicBoolean()
         fun settle(ok: Boolean) {
             if (settled.compareAndSet(false, true)) main.post { result.success(ok) }
@@ -472,7 +512,12 @@ class WifiWs(
                 override fun onOpen(webSocket: WebSocket, response: Response) {
                     main.post {
                         val current = visible && sockets[id] === webSocket
-                        if (current) holdWifi() else webSocket.cancel()
+                        if (current) {
+                            PerfProbe.connectionOpened(id, webSocket)
+                            holdWifi()
+                        } else {
+                            webSocket.cancel()
+                        }
                         settle(current)
                     }
                 }
@@ -480,6 +525,9 @@ class WifiWs(
                 override fun onMessage(webSocket: WebSocket, text: String) {
                     main.post {
                         if (!visible || sockets[id] !== webSocket) return@post
+                        if (debugAuthObserverEnabled) {
+                            PerfProbe.observeAuthenticatedMessage(id, webSocket, text, debugAuthObserverEnabled)
+                        }
                         events?.success(mapOf("id" to id, "event" to "text", "data" to text))
                     }
                 }
@@ -488,6 +536,7 @@ class WifiWs(
                     main.post {
                         if (sockets.remove(id, webSocket)) {
                             pointer.drop(id)
+                            PerfProbe.connectionEnded(id, webSocket, "closed")
                             releaseWifiIfIdle()
                             emit(id, "close")
                         }
@@ -499,6 +548,7 @@ class WifiWs(
                     main.post {
                         if (sockets.remove(id, webSocket)) {
                             pointer.drop(id)
+                            PerfProbe.connectionEnded(id, webSocket, "failed")
                             releaseWifiIfIdle()
                             emit(id, "close")
                         }
@@ -508,6 +558,7 @@ class WifiWs(
             },
         )
         sockets[id] = ws
+        PerfProbe.registerConnection(id, ws)
     }
 
     private fun pointerSocketFactory(): SocketFactory {
@@ -653,9 +704,9 @@ internal object LauncherIcon {
     private const val PREFS = "agentpad_app_icon"
     private const val PENDING = "pending_app_icon"
 
-    /** 启动过程中改 alias 会把这次界面收掉，这里只把真实 Activity 恢复成默认启用。 */
+    /** 仅由稳定 MainActivity 任务根在冷启动时应用待更新图标。 */
     fun onColdStart(activity: android.app.Activity) {
-        restoreActivity(activity)
+        applyPending(activity)
     }
 
     fun finish(activity: android.app.Activity) {
