@@ -176,6 +176,33 @@ fn apply_text(conn: &mut Conn, content: &str, auto_enter: bool, send_mode: &str)
     }
 }
 
+#[cfg(windows)]
+static INPUT_STOPPED: std::sync::Mutex<bool> = std::sync::Mutex::new(false);
+
+#[cfg(any(windows, test))]
+fn input_if_running(gate: &std::sync::Mutex<bool>, apply: impl FnOnce()) {
+    let stopped = gate.lock().unwrap();
+    if !*stopped {
+        apply();
+    }
+}
+
+#[cfg(any(windows, test))]
+fn stop_input_once(gate: &std::sync::Mutex<bool>, release: impl FnOnce()) {
+    let mut stopped = gate.lock().unwrap();
+    if !*stopped {
+        *stopped = true;
+        release();
+    }
+}
+
+#[cfg(windows)]
+pub fn stop_input() {
+    stop_input_once(&INPUT_STOPPED, || {
+        let _ = agentpad_input::inject_pointer(0.0, 0.0, 0, 0);
+    });
+}
+
 pub fn apply_actions(actions: &[Action]) {
     if !actions.is_empty() && !agentpad_input::accessibility_trusted() {
         for action in actions {
@@ -183,6 +210,11 @@ pub fn apply_actions(actions: &[Action]) {
         }
         return;
     }
+    #[cfg(windows)]
+    input_if_running(&INPUT_STOPPED, || {
+        run_actions(actions, |a| inject_action(a).is_ok());
+    });
+    #[cfg(not(windows))]
     run_actions(actions, |a| inject_action(a).is_ok());
 }
 
@@ -228,6 +260,17 @@ fn inject_action(a: &Action) -> Result<(), agentpad_input::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shutdown_releases_once_and_rejects_late_queued_input() {
+        let gate = std::sync::Mutex::new(false);
+        let calls = std::cell::RefCell::new(Vec::new());
+        input_if_running(&gate, || calls.borrow_mut().push("press"));
+        stop_input_once(&gate, || calls.borrow_mut().push("release"));
+        input_if_running(&gate, || calls.borrow_mut().push("late press"));
+        stop_input_once(&gate, || calls.borrow_mut().push("second release"));
+        assert_eq!(*calls.borrow(), ["press", "release"]);
+    }
 
     #[test]
     fn failed_text_cancels_following_enter_only() {

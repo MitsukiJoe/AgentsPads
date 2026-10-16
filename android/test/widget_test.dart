@@ -904,9 +904,88 @@ void main() {
     await gesture.up();
   });
 
+  testWidgets(
+    'target switch releases old buttons and discards an ongoing trackball gesture',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final store = PadStore()
+        ..pointerMode = 'trackball'
+        ..devices = [
+          for (final id in ['a', 'b'])
+            Device(
+              deviceId: id,
+              name: id,
+              ips: [id],
+              secret: 'k',
+              port: 9618,
+              selected: id == 'a',
+            ),
+        ];
+      const ws = MethodChannel('agentpad/ws');
+      const events = MethodChannel('agentpad/ws_events');
+      final calls = <Map>[];
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(ws, (
+        call,
+      ) async {
+        fakePc(call, store.devices);
+        if (call.method == 'pointer') calls.add(call.arguments as Map);
+        return ['connect', 'send', 'pointer', 'close'].contains(call.method)
+            ? true
+            : null;
+      });
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        events,
+        (_) async => null,
+      );
+      addTearDown(() {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          ws,
+          null,
+        );
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          events,
+          null,
+        );
+      });
+      await tester.pumpWidget(
+        AgentsPadsApp(store: store, enableAutomaticUpdateChecks: false),
+      );
+      await tester.pump();
+      await tester.pump();
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('pointer-cap'))),
+      );
+      await gesture.moveBy(const Offset(25, 0));
+      await tester.pump(const Duration(milliseconds: 20));
+      store.selectDevice(store.devices.last, true);
+      await tester.pump();
+      expect(calls.last['id'], startsWith('a:'));
+      expect(calls.last['buttons'], 0);
+      final count = calls.length;
+      await gesture.moveBy(const Offset(25, 0));
+      await tester.pump(const Duration(milliseconds: 25));
+      expect(calls, hasLength(count));
+      await gesture.up();
+      await tester.pump();
+      final next = await tester.startGesture(
+        tester.getCenter(find.byKey(const ValueKey('pointer-cap'))),
+      );
+      await next.moveBy(const Offset(25, 0));
+      await next.moveBy(const Offset(10, 0));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 25)),
+      );
+      await tester.pump(const Duration(milliseconds: 20));
+      expect(calls.last['id'], startsWith('b:'));
+      await next.up();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   testWidgets('pointer speed is scaled per connected platform', (tester) async {
     SharedPreferences.setMockInitialValues({});
     final store = PadStore()
+      ..limitActiveDevices = false
       ..pointerSpeedWindows = 2
       ..pointerSpeedMac = 5
       ..devices = [
@@ -982,11 +1061,15 @@ void main() {
       ]),
     );
     expect(
-      moves.firstWhere((call) => (call['id'] as String).startsWith('win:'))['dx'],
+      moves.firstWhere(
+        (call) => (call['id'] as String).startsWith('win:'),
+      )['dx'],
       8,
     );
     expect(
-      moves.firstWhere((call) => (call['id'] as String).startsWith('mac:'))['dx'],
+      moves.firstWhere(
+        (call) => (call['id'] as String).startsWith('mac:'),
+      )['dx'],
       20,
     );
 
@@ -1096,10 +1179,10 @@ void main() {
       expect(tester.getCenter(glyph).dy, lessThan(wheelRect.bottom));
       await g.up();
       await tester.pump();
-    await tester.pump(const Duration(milliseconds: 130));
-    // Quarter way through elasticOut: already past rest (overshoot).
-    expect(tester.getCenter(glyph).dy, lessThan(rest));
-    await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump(const Duration(milliseconds: 130));
+      // Quarter way through elasticOut: already past rest (overshoot).
+      expect(tester.getCenter(glyph).dy, lessThan(rest));
+      await tester.pump(const Duration(milliseconds: 500));
       expect(tester.getCenter(glyph).dy, rest);
 
       await tester.tap(find.byTooltip('设置'));
@@ -1374,8 +1457,12 @@ void main() {
     final store = PadStore()
       ..devices = [
         Device(
-          deviceId: 'mac', name: 'Mac', ips: ['127.0.0.1'], secret: 'k',
-          port: 9618, os: 'macos',
+          deviceId: 'mac',
+          name: 'Mac',
+          ips: ['127.0.0.1'],
+          secret: 'k',
+          port: 9618,
+          os: 'macos',
         ),
       ];
     const ws = MethodChannel('agentpad/ws');
@@ -1390,11 +1477,15 @@ void main() {
       return null;
     });
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
-      events, (_) async => null,
+      events,
+      (_) async => null,
     );
     addTearDown(() {
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(ws, null);
-      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(events, null);
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        events,
+        null,
+      );
     });
     await tester.pumpWidget(
       AgentsPadsApp(store: store, enableAutomaticUpdateChecks: false),
@@ -2168,10 +2259,7 @@ void main() {
     );
     await tester.pump();
 
-    expect(
-      find.byKey(const ValueKey('landscape-pointer-pane')),
-      findsNothing,
-    );
+    expect(find.byKey(const ValueKey('landscape-pointer-pane')), findsNothing);
     expect(find.byKey(const ValueKey('landscape-input-pane')), findsNothing);
     expect(find.byKey(const ValueKey('page-scroll')), findsOneWidget);
     expect(tester.takeException(), isNull);
@@ -2183,37 +2271,43 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('small landscape windows and large text fall back to one column', (
-    tester,
-  ) async {
-    SharedPreferences.setMockInitialValues({});
-    tester.view.devicePixelRatio = 1;
-    tester.view.display.size = const Size(2400, 1080);
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    addTearDown(tester.view.display.resetSize);
-    addTearDown(tester.view.resetViewInsets);
-    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    for (final scenario in [
-      (const Size(500, 360), 0.0, 1.0, 'medium'),
-      (const Size(640, 360), 200.0, 1.0, 'medium'),
-      (const Size(844, 390), 0.0, 1.6, 'medium'),
-      (const Size(640, 360), 0.0, 1.0, 'huge'),
-    ]) {
-      tester.view.physicalSize = scenario.$1;
-      tester.view.viewInsets = FakeViewPadding(bottom: scenario.$2);
-      tester.platformDispatcher.textScaleFactorTestValue = scenario.$3;
-      final store = PadStore()..inputHeight = scenario.$4;
-      await tester.pumpWidget(
-        AgentsPadsApp(
-          key: UniqueKey(), store: store, enableAutomaticUpdateChecks: false,
-        ),
-      );
-      await tester.pump();
-      expect(find.byKey(const ValueKey('landscape-input-pane')), findsNothing);
-      expect(tester.takeException(), isNull);
-    }
-  });
+  testWidgets(
+    'small landscape windows and large text fall back to one column',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      tester.view.devicePixelRatio = 1;
+      tester.view.display.size = const Size(2400, 1080);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.display.resetSize);
+      addTearDown(tester.view.resetViewInsets);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      for (final scenario in [
+        (const Size(500, 360), 0.0, 1.0, 'medium'),
+        (const Size(640, 360), 200.0, 1.0, 'medium'),
+        (const Size(844, 390), 0.0, 1.6, 'medium'),
+        (const Size(640, 360), 0.0, 1.0, 'huge'),
+      ]) {
+        tester.view.physicalSize = scenario.$1;
+        tester.view.viewInsets = FakeViewPadding(bottom: scenario.$2);
+        tester.platformDispatcher.textScaleFactorTestValue = scenario.$3;
+        final store = PadStore()..inputHeight = scenario.$4;
+        await tester.pumpWidget(
+          AgentsPadsApp(
+            key: UniqueKey(),
+            store: store,
+            enableAutomaticUpdateChecks: false,
+          ),
+        );
+        await tester.pump();
+        expect(
+          find.byKey(const ValueKey('landscape-input-pane')),
+          findsNothing,
+        );
+        expect(tester.takeException(), isNull);
+      }
+    },
+  );
 
   testWidgets(
     'landscape splits into scrollable pointer and fixed input panes',

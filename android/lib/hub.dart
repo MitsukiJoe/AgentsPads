@@ -12,7 +12,27 @@ import 'store.dart';
 typedef OnHub = void Function();
 
 class Hub {
-  Hub(this.store, {this.onChange, this.active = true});
+  Hub(this.store, {this.onChange, this.onTargetsChanged, this.active = true}) {
+    store.onTargetsChanged = _targetsChanged;
+  }
+
+  final OnHub? onTargetsChanged;
+
+  void _targetsChanged(List<Device> before, List<Device> next) {
+    for (final d in before) {
+      if (next.any((n) => _samePc(d, n))) continue;
+      for (final e in links.entries) {
+        if (!online.contains(e.key) || !_samePc(d, e.value.device)) continue;
+        final link = e.value;
+        link._wheelRemainder = 0;
+        if (!link.sendPointer(0, 0, 0, 0, immediate: true)) {
+          link.sendFast(pointerMsg(0, 0, 0, 0));
+        }
+        break;
+      }
+    }
+    onTargetsChanged?.call();
+  }
 
   final PadStore store;
   final OnHub? onChange;
@@ -102,16 +122,14 @@ class Hub {
 
   Future<bool> sendSelected(String json) async {
     var any = false;
-    for (final d in store.devices) {
-      if (!d.selected) continue;
+    for (final d in store.activeDevices.toList()) {
       if (await sendTo(d, json)) any = true;
     }
     return any;
   }
 
   void sendSelectedFast(String json) {
-    for (final d in store.devices) {
-      if (!d.selected) continue;
+    for (final d in store.activeDevices.toList()) {
       sendToFast(d, json);
     }
   }
@@ -123,8 +141,7 @@ class Hub {
     double wheel, {
     bool immediate = false,
   }) {
-    for (final d in store.devices) {
-      if (!d.selected) continue;
+    for (final d in store.activeDevices.toList()) {
       for (final e in links.entries) {
         if (!online.contains(e.key)) continue;
         if (!_samePc(d, e.value.device)) continue;
@@ -162,6 +179,7 @@ class Hub {
   }
 
   void dispose() {
+    store.onTargetsChanged = null;
     active = false;
     _stopLinks();
   }
@@ -259,10 +277,13 @@ class PcLink {
     final s = _send;
     final ok = s != null && await s(json);
     if (DiagnosticLog.enabled && !hasPointerPump) {
-      unawaited(DiagnosticLog.record(
-        DiagnosticLog.classify(json), DiagnosticStage.send,
-        ok ? DiagnosticResult.ok : DiagnosticResult.failed,
-      ));
+      unawaited(
+        DiagnosticLog.record(
+          DiagnosticLog.classify(json),
+          DiagnosticStage.send,
+          ok ? DiagnosticResult.ok : DiagnosticResult.failed,
+        ),
+      );
     }
     return ok;
   }
@@ -272,9 +293,13 @@ class PcLink {
     if (f != null) {
       f(json);
       if (DiagnosticLog.enabled && !hasPointerPump) {
-        unawaited(DiagnosticLog.record(
-          DiagnosticLog.classify(json), DiagnosticStage.send, DiagnosticResult.ok,
-        ));
+        unawaited(
+          DiagnosticLog.record(
+            DiagnosticLog.classify(json),
+            DiagnosticStage.send,
+            DiagnosticResult.ok,
+          ),
+        );
       }
       return;
     }
@@ -305,12 +330,20 @@ class PcLink {
     void onText(String raw) {
       if (attempt == _attempt) onServerMessage(raw);
     }
+
     void awaitIdentity() {
       handshake = Timer(const Duration(seconds: 5), () {
         if (attempt == _attempt && !_identified) unawaited(_close?.call());
       });
     }
-    unawaited(DiagnosticLog.record(DiagnosticKind.connection, DiagnosticStage.start, DiagnosticResult.active));
+
+    unawaited(
+      DiagnosticLog.record(
+        DiagnosticKind.connection,
+        DiagnosticStage.start,
+        DiagnosticResult.active,
+      ),
+    );
     try {
       NativeWs? native;
       try {
@@ -328,9 +361,13 @@ class PcLink {
           awaitIdentity();
           _flushReply();
           session = true;
-          unawaited(DiagnosticLog.record(
-            DiagnosticKind.connection, DiagnosticStage.start, DiagnosticResult.ok,
-          ));
+          unawaited(
+            DiagnosticLog.record(
+              DiagnosticKind.connection,
+              DiagnosticStage.start,
+              DiagnosticResult.ok,
+            ),
+          );
           await native.done;
           return _identified;
         }
@@ -355,7 +392,13 @@ class PcLink {
       awaitIdentity();
       _flushReply();
       session = true;
-      unawaited(DiagnosticLog.record(DiagnosticKind.connection, DiagnosticStage.start, DiagnosticResult.ok));
+      unawaited(
+        DiagnosticLog.record(
+          DiagnosticKind.connection,
+          DiagnosticStage.start,
+          DiagnosticResult.ok,
+        ),
+      );
       await for (final msg in ch.stream) {
         if (msg is String) onText(msg);
       }
@@ -369,7 +412,13 @@ class PcLink {
       _identified = false;
       _answered = false;
       _pendingReply = null;
-      unawaited(DiagnosticLog.record(DiagnosticKind.connection, DiagnosticStage.stop, session ? DiagnosticResult.ok : DiagnosticResult.failed));
+      unawaited(
+        DiagnosticLog.record(
+          DiagnosticKind.connection,
+          DiagnosticStage.stop,
+          session ? DiagnosticResult.ok : DiagnosticResult.failed,
+        ),
+      );
       if (identical(hub.links[key], this)) hub.online.remove(key);
       final close = _close;
       _close = null;
@@ -409,9 +458,13 @@ class PcLink {
     if (_stop) return;
     _waitingPong = false;
     if (DiagnosticLog.enabled) {
-      unawaited(DiagnosticLog.record(
-        DiagnosticLog.classify(raw), DiagnosticStage.receive, DiagnosticResult.ok,
-      ));
+      unawaited(
+        DiagnosticLog.record(
+          DiagnosticLog.classify(raw),
+          DiagnosticStage.receive,
+          DiagnosticResult.ok,
+        ),
+      );
     }
     try {
       final v = jsonDecode(raw);
@@ -462,7 +515,7 @@ class PcLink {
         }
         _identified = true;
         _armSilence();
-        hub.store.devices = upsertDevice(hub.store.devices, device);
+        hub.store.upsert(device);
         device = hub.store.devices.firstWhere(
           (d) => d.deviceId == did,
           orElse: () => device,

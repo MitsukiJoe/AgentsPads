@@ -14,6 +14,15 @@ class RecordingLink extends PcLink {
   final packets = <Map<String, dynamic>>[];
 
   @override
+  bool get hasPointerPump => native;
+
+  @override
+  Future<bool> send(String json) async {
+    sendFast(json);
+    return true;
+  }
+
+  @override
   bool sendPointer(
     double dx,
     double dy,
@@ -238,11 +247,7 @@ void main() {
       await settle();
       final link = hub.links[Hub.keyOf(added)]!;
       link.onServerMessage(
-        jsonEncode({
-          'type': 'challenge',
-          'nonce': 'n1',
-          'device_id': 'pc-z',
-        }),
+        jsonEncode({'type': 'challenge', 'nonce': 'n1', 'device_id': 'pc-z'}),
       );
       link.onServerMessage(
         jsonEncode({
@@ -295,6 +300,42 @@ void main() {
     });
   });
 
+  test(
+    'switch releases native and fallback targets and all input uses one set',
+    () async {
+      for (final native in [true, false]) {
+        final a = Device(deviceId: 'a', name: 'A', ips: ['a'], port: 9618);
+        final b = Device(deviceId: 'b', name: 'B', ips: ['b'], port: 9618);
+        final store = PadStore()..devices = [a, b];
+        var cancelled = 0;
+        final hub = Hub(store, onTargetsChanged: () => cancelled++);
+        final first = RecordingLink(hub, a, 'a', native: native);
+        final second = RecordingLink(hub, b, 'b', native: native);
+        hub.links.addAll({'a': first, 'b': second});
+        hub.online.addAll(['a', 'b']);
+        hub.sendPointer(1, 1, 1, 0);
+        store.selectDevice(b, true);
+        expect(first.packets.last['buttons'], 0);
+        expect(first.packets.last['dx'], 0);
+        expect(cancelled, 1);
+        final firstCount = first.packets.length;
+        await hub.sendSelected(keyMsg('Enter', []));
+        hub.sendPointer(1, 1, 0, 0);
+        expect(first.packets, hasLength(firstCount));
+        expect(second.packets, hasLength(2));
+        expect(hub.online, {'a', 'b'});
+        store.selectDevice(b, false);
+        final secondCount = second.packets.length;
+        await hub.sendSelected(
+          textMsg('none', autoEnter: false, sendMode: 'text'),
+        );
+        hub.sendPointer(1, 1, 0, 0);
+        expect(second.packets, hasLength(secondCount));
+        hub.dispose();
+      }
+    },
+  );
+
   test('throwing UI callbacks do not escape the hub', () {
     final hub = Hub(
       PadStore(),
@@ -330,6 +371,7 @@ void main() {
     'mixed transports scale each online target once and retain wheel fractions',
     () {
       final store = PadStore()
+        ..limitActiveDevices = false
         ..devices = [
           Device(
             deviceId: 'mac',

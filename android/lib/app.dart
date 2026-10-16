@@ -11,6 +11,7 @@ import 'package:flutter/services.dart'
         KeyRepeatEvent,
         LogicalKeyboardKey,
         MethodChannel,
+        PlatformException,
         SystemChrome;
 
 import 'package:flutter/foundation.dart' show kDebugMode;
@@ -50,7 +51,8 @@ class AndroidUpdateInfo {
 List<Uri> androidUpdateManifestUris([DateTime? now]) {
   final hour =
       (now ?? DateTime.now()).toUtc().millisecondsSinceEpoch ~/ 3600000;
-  const path = 'gh/MitsukiJoe/AgentsPads@update-manifest/agentspads-update.json';
+  const path =
+      'gh/MitsukiJoe/AgentsPads@update-manifest/agentspads-update.json';
   return [
     Uri.parse(
       'https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads-update.json',
@@ -78,6 +80,16 @@ bool isNewerAppVersion(String remote, String current) {
   }
   return false;
 }
+
+/// 「跟随系统」按系统亮度解析成 white / black；已指定的浅色或深色原样返回。
+String resolveAppIconTarget(String pref, Brightness platformBrightness) {
+  if (pref == 'black' || pref == 'white') return pref;
+  return platformBrightness == Brightness.dark ? 'black' : 'white';
+}
+
+/// 原生待处理状态只有完整操作成功后才清除，部分失败时仍允许重试。
+bool appIconRestartHintVisible(String? pending, String current) =>
+    pending == 'white' || pending == 'black';
 
 AndroidUpdateInfo newerAndroidUpdate(
   AndroidUpdateInfo? current,
@@ -222,6 +234,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   late final PadStore store;
   Hub? hub;
   VoidCallback? _refreshConnectedSheet;
+  VoidCallback? _refreshSettingsSheet;
   final input = TextEditingController();
   final inputFocus = FocusNode();
   final pointer = PointerCoalescer();
@@ -241,6 +254,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   String? pendingUpdateTag;
   String? pendingUpdateBody;
   String? pendingUpdateApkUrl;
+  String _appIconCurrent = 'white';
+  String? _appIconPending;
   Offset? trackPointVec;
   var leftDown = false;
   var rightDown = false;
@@ -272,6 +287,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     hub = Hub(
       store,
       active: _connectionsActive,
+      onTargetsChanged: _cancelTargetGesture,
       onChange: () {
         if (mounted) setState(() {});
         _refreshConnectedSheet?.call();
@@ -293,7 +309,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     unawaited(_applyPointerHzDefault());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _applyAppIcon(store.appIcon);
+      unawaited(_applyAppIcon(store.appIcon));
       if (widget.enableAutomaticUpdateChecks) {
         unawaited(_checkAndroidUpdate(notify: false));
       }
@@ -303,6 +319,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         if (mounted) unawaited(_checkAndroidUpdate(notify: false));
       });
     }
+  }
+
+  @override
+  void didChangePlatformBrightness() {
+    if (store.appIcon != 'system') return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_applyAppIcon(store.appIcon));
+    });
   }
 
   bool get _connectionsActive =>
@@ -328,6 +352,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       pointerCadence.reset();
       touchpad.cancel();
       activePointerIds.clear();
+      _ignoredPointerIds.clear();
       pointerActive = leftDown = rightDown = false;
     }
   }
@@ -501,13 +526,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final wheel = (p['wheel'] as num).toDouble();
     final h = hub;
     if (h == null) return;
-    h.sendPointer(
-      dx,
-      dy,
-      buttons,
-      wheel,
-      immediate: immediate,
-    );
+    h.sendPointer(dx, dy, buttons, wheel, immediate: immediate);
   }
 
   void _flushPointer() {
@@ -517,6 +536,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _addPointer(double dx, double dy, int buttons, double wheel) {
+    if (_ignoredPointerIds.isNotEmpty) return;
     pointer.add(dx, dy, buttons, wheel);
     if (pointerCadence.due(_pointerNow)) _flushPointer();
     _startPointerTimer();
@@ -536,6 +556,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   void _queueImmediatePointer(double dx, double dy, int buttons, double wheel) {
+    if (_ignoredPointerIds.isNotEmpty) return;
     final pending = pointer.tick();
     if (pending != null) _emitPointer(pending);
     pointer.add(dx, dy, buttons, wheel);
@@ -552,23 +573,31 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final display = View.of(context).display.size;
-            final textScale = math.max(
-              1.0,
-              MediaQuery.textScalerOf(context).scale(14) / 14,
-            );
-            return constraints.maxWidth > constraints.maxHeight &&
-                    display.width > display.height &&
-                    constraints.maxWidth >= 640 * textScale &&
-                    constraints.maxHeight >= _inputBoxHeight + 160 * textScale
-                ? _landscapeLayout()
-                : _portraitLayout(constraints);
-          },
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop && ModalRoute.of(context)?.isCurrent == true) {
+          unawaited(_finishForAppIcon());
+        }
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: true,
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final display = View.of(context).display.size;
+              final textScale = math.max(
+                1.0,
+                MediaQuery.textScalerOf(context).scale(14) / 14,
+              );
+              return constraints.maxWidth > constraints.maxHeight &&
+                      display.width > display.height &&
+                      constraints.maxWidth >= 640 * textScale &&
+                      constraints.maxHeight >= _inputBoxHeight + 160 * textScale
+                  ? _landscapeLayout()
+                  : _portraitLayout(constraints);
+            },
+          ),
         ),
       ),
     );
@@ -1162,7 +1191,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
+  final _ignoredPointerIds = <int>{};
+
+  void _cancelTargetGesture() {
+    _ignoredPointerIds.addAll(activePointerIds);
+    activePointerIds.clear();
+    _stopTrackPoint();
+    pointerTimer?.cancel();
+    pointerTimer = null;
+    padLongPressTimer?.cancel();
+    pointer.tick();
+    pointer.buttons = 0;
+    pointerCadence.reset();
+    touchpad.cancel();
+    leftDown = rightDown = pointerActive = false;
+    if (mounted) setState(() {});
+  }
+
   void _setPointerActive(PointerEvent event, bool active) {
+    if (!active) _ignoredPointerIds.remove(event.pointer);
     active
         ? activePointerIds.add(event.pointer)
         : activePointerIds.remove(event.pointer);
@@ -1362,7 +1409,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               key: ValueKey('device-capsule-$id'),
               behavior: HitTestBehavior.opaque,
               onTap: () {
-                d.selected = !d.selected;
+                store.selectDevice(d, !d.selected);
                 _persist();
               },
               onLongPress: () => _showDeviceActions(d, capsuleContext),
@@ -1448,7 +1495,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     },
     child: ClipRect(
       key: const ValueKey('device-strip-horizontal-clip'),
-      clipper: _HorizontalOnlyClipper(1 / MediaQuery.devicePixelRatioOf(context)),
+      clipper: _HorizontalOnlyClipper(
+        1 / MediaQuery.devicePixelRatioOf(context),
+      ),
       child: child,
     ),
   );
@@ -1579,7 +1628,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       ),
     );
     if (deleted != true) return;
-    store.devices.remove(d);
+    store.removeDevice(d);
     await _persist();
   }
 
@@ -1605,8 +1654,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
               );
             }
           },
-          onPointerMove: (e) =>
-              _applyPadActions(touchpad.move(e.pointer, e.localPosition)),
+          onPointerMove: (e) {
+            if (!_ignoredPointerIds.contains(e.pointer)) {
+              _applyPadActions(touchpad.move(e.pointer, e.localPosition));
+            }
+          },
           onPointerUp: (e) {
             padLongPressTimer?.cancel();
             _applyPadActions(touchpad.up(e.pointer, e.localPosition));
@@ -1758,7 +1810,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
             key: const ValueKey('trackpoint-cap'),
             behavior: HitTestBehavior.opaque,
             onPointerDown: (e) => _holdTrackPoint(e.localPosition, box),
-            onPointerMove: (e) => _holdTrackPoint(e.localPosition, box),
+            onPointerMove: (e) {
+              if (!_ignoredPointerIds.contains(e.pointer)) {
+                _holdTrackPoint(e.localPosition, box);
+              }
+            },
             onPointerUp: (_) => _stopTrackPoint(),
             onPointerCancel: (_) => _stopTrackPoint(),
             child: DecoratedBox(
@@ -1924,554 +1980,700 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _openSettings() async {
+    unawaited(_loadAppIconState());
+    if (!mounted) return;
     await _openFloatingPanel(
       scrollKey: const ValueKey('settings-scroll'),
       closeKey: const ValueKey('settings-close'),
       closeTooltip: '关闭设置',
-      builder: (ctx, setSheet) => Theme(
-        data: Theme.of(ctx).copyWith(
-          segmentedButtonTheme: SegmentedButtonThemeData(
-            style: _segmentStyle(),
-          ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('外观', style: TextStyle(fontSize: 18)),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _themePick(
-                  ctx,
-                  setSheet,
-                  Icons.brightness_auto,
-                  'system',
-                  '系统',
-                ),
-                _themePick(ctx, setSheet, Icons.light_mode, 'light', '浅色'),
-                _themePick(ctx, setSheet, Icons.dark_mode, 'dark', '深色'),
-              ],
+      builder: (ctx, setSheet) {
+        _refreshSettingsSheet = () {
+          if (ctx.mounted) setSheet(() {});
+        };
+        return Theme(
+          data: Theme.of(ctx).copyWith(
+            segmentedButtonTheme: SegmentedButtonThemeData(
+              style: _segmentStyle(),
             ),
-            const SizedBox(height: 20),
-            const Align(alignment: Alignment.centerLeft, child: Text('主题色')),
-            const SizedBox(height: 8),
-            FittedBox(
-              fit: BoxFit.scaleDown,
-              child: Row(
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('外观', style: TextStyle(fontSize: 18)),
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  _themePick(
+                    ctx,
+                    setSheet,
+                    Icons.brightness_auto,
+                    'system',
+                    '系统',
+                  ),
+                  _themePick(ctx, setSheet, Icons.light_mode, 'light', '浅色'),
+                  _themePick(ctx, setSheet, Icons.dark_mode, 'dark', '深色'),
+                ],
+              ),
+              const SizedBox(height: 20),
+              const Align(alignment: Alignment.centerLeft, child: Text('主题色')),
+              const SizedBox(height: 8),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    _colorPick(ctx, setSheet, 'monochrome', '黑白'),
+                    _colorPick(ctx, setSheet, 'blue', '蓝色'),
+                    _colorPick(ctx, setSheet, 'pink', '粉色'),
+                    _colorPick(ctx, setSheet, 'green', '绿色'),
+                    _colorPick(ctx, setSheet, 'gold', '金色'),
+                    _colorPick(ctx, setSheet, 'red', '红色'),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              const Align(alignment: Alignment.centerLeft, child: Text('桌面图标')),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'system', label: Text('跟随系统')),
+                    ButtonSegment(value: 'white', label: Text('默认浅色')),
+                    ButtonSegment(value: 'black', label: Text('沉稳深色')),
+                  ],
+                  selected: {store.appIcon},
+                  onSelectionChanged: (s) async {
+                    store.appIcon = s.first;
+                    await _persist();
+                    await _applyAppIcon(store.appIcon);
+                    if (ctx.mounted) setSheet(() {});
+                  },
+                ),
+              ),
+              if (appIconRestartHintVisible(_appIconPending, _appIconCurrent))
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: _appIconRestartHint(ctx),
+                ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Text('连接后添加全部 IP')),
+                  Transform.scale(
+                    scale: 0.78,
+                    alignment: Alignment.centerRight,
+                    child: Switch(
+                      key: const ValueKey('collect-all-ips'),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: store.collectAllIps,
+                      onChanged: (v) async {
+                        store.collectAllIps = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('已连接设备的快捷开关显示在什么地方'),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                key: const ValueKey('device-strip-placement'),
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'input', label: Text('输入框下方')),
+                    ButtonSegment(value: 'top', label: Text('顶部')),
+                  ],
+                  selected: {store.deviceStripPlacement},
+                  onSelectionChanged: (s) async {
+                    store.deviceStripPlacement = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('是否限制同时激活的设备数量'),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<bool>(
+                  key: const ValueKey('limit-active-devices'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: true, label: Text('单个')),
+                    ButtonSegment(value: false, label: Text('不限')),
+                  ],
+                  selected: {store.limitActiveDevices},
+                  onSelectionChanged: (values) async {
+                    store.limitActiveDevices = values.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Text('语音自动发送延迟'),
+                  IconButton(
+                    tooltip: '语音自动发送说明',
+                    onPressed: _showVoiceHelp,
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 28,
+                      height: 28,
+                    ),
+                    iconSize: 18,
+                    icon: const Icon(Icons.info_outline),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 0, label: Text('无延迟')),
+                    ButtonSegment(value: 500, label: Text('0.5 秒')),
+                    ButtonSegment(value: 1000, label: Text('1 秒')),
+                    ButtonSegment(value: 1500, label: Text('1.5 秒')),
+                  ],
+                  selected: {store.voiceDelayMs},
+                  onSelectionChanged: (s) async {
+                    store.voiceDelayMs = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Text('切换光标设备')),
+                  const Text('首页显示'),
+                  const SizedBox(width: 6),
+                  Transform.scale(
+                    scale: 0.78,
+                    alignment: Alignment.centerRight,
+                    child: Switch(
+                      key: const ValueKey('home-pointer-quick-switch'),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: store.homePointerQuickSwitch,
+                      onChanged: (v) async {
+                        store.homePointerQuickSwitch = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                key: const ValueKey('settings-pointer-mode-sync'),
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'trackpad', label: Text('触控板')),
+                    ButtonSegment(value: 'trackball', label: Text('轨迹球')),
+                    ButtonSegment(value: 'trackpoint', label: Text('小红点')),
+                  ],
+                  selected: {store.pointerMode},
+                  onSelectionChanged: (s) async {
+                    _stopTrackPoint();
+                    store.pointerMode = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('触控板大小'),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'small', label: Text('小')),
+                    ButtonSegment(value: 'medium', label: Text('中')),
+                    ButtonSegment(value: 'large', label: Text('大')),
+                  ],
+                  selected: {store.pointerSize},
+                  onSelectionChanged: (s) async {
+                    store.pointerSize = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Text('长按轻震反馈')),
+                  Transform.scale(
+                    scale: 0.78,
+                    alignment: Alignment.centerRight,
+                    child: Switch(
+                      key: const ValueKey('long-press-haptic'),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: store.longPressHaptic,
+                      onChanged: (v) async {
+                        store.longPressHaptic = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Align(alignment: Alignment.centerLeft, child: Text('滚轮位置')),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'left', label: Text('左侧')),
+                    ButtonSegment(value: 'right', label: Text('右侧')),
+                  ],
+                  selected: {store.wheelSide},
+                  onSelectionChanged: (s) async {
+                    store.wheelSide = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('滚轮方向反转'),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: _platformSwitch(
+                      key: const ValueKey('wheel-reverse-windows'),
+                      label: 'Windows',
+                      value: store.wheelReverseWindows,
+                      onChanged: (v) async {
+                        store.wheelReverseWindows = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _platformSwitch(
+                      key: const ValueKey('wheel-reverse-mac'),
+                      label: 'Mac',
+                      value: store.wheelReverseMac,
+                      onChanged: (v) async {
+                        store.wheelReverseMac = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              const Align(alignment: Alignment.centerLeft, child: Text('指针速度')),
+              const SizedBox(height: 8),
+              _platformSpeedSlider(
+                key: const ValueKey('pointer-speed-windows'),
+                label: 'Windows',
+                value: store.pointerSpeedWindows,
+                gears: PadStore.pointerGears,
+                onChanged: (v) async {
+                  store.pointerSpeedWindows = v;
+                  await _persist();
+                  setSheet(() {});
+                },
+              ),
+              const SizedBox(height: 8),
+              _platformSpeedSlider(
+                key: const ValueKey('pointer-speed-mac'),
+                label: 'Mac',
+                value: store.pointerSpeedMac,
+                gears: PadStore.pointerGears,
+                onChanged: (v) async {
+                  store.pointerSpeedMac = v;
+                  await _persist();
+                  setSheet(() {});
+                },
+              ),
+              const SizedBox(height: 16),
+              const Align(alignment: Alignment.centerLeft, child: Text('滚轮速度')),
+              const SizedBox(height: 8),
+              _platformSpeedSlider(
+                key: const ValueKey('wheel-speed-windows'),
+                label: 'Windows',
+                value: store.wheelSpeedWindows,
+                gears: PadStore.wheelGearsWindows,
+                onChanged: (v) async {
+                  store.wheelSpeedWindows = v;
+                  await _persist();
+                  setSheet(() {});
+                },
+              ),
+              const SizedBox(height: 8),
+              _platformSpeedSlider(
+                key: const ValueKey('wheel-speed-mac'),
+                label: 'Mac',
+                value: store.wheelSpeedMac,
+                gears: PadStore.wheelGears,
+                onChanged: (v) async {
+                  store.wheelSpeedMac = v;
+                  await _persist();
+                  setSheet(() {});
+                },
+              ),
+              const SizedBox(height: 24),
+              const Align(
+                alignment: Alignment.centerLeft,
+                child: Text('指针发送频率'),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: SegmentedButton<int>(
+                  key: const ValueKey('pointer-hz'),
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 60, label: Text('60Hz')),
+                    ButtonSegment(value: 120, label: Text('120Hz')),
+                    ButtonSegment(value: 240, label: Text('240Hz')),
+                  ],
+                  selected: {store.pointerHz},
+                  onSelectionChanged: (s) async {
+                    store.pointerHz = s.first;
+                    store.pointerHzManual = true;
+                    _retunePointerCadence();
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              const Align(alignment: Alignment.centerLeft, child: Text('横屏布局')),
+              const SizedBox(height: 8),
+              SizedBox(
+                key: const ValueKey('landscape-pointer-side-setting'),
+                width: double.infinity,
+                child: SegmentedButton<String>(
+                  showSelectedIcon: false,
+                  segments: const [
+                    ButtonSegment(value: 'left', label: Text('触控在左')),
+                    ButtonSegment(value: 'right', label: Text('触控在右')),
+                  ],
+                  selected: {store.landscapePointerSide},
+                  onSelectionChanged: (s) async {
+                    store.landscapePointerSide = s.first;
+                    await _persist();
+                    setSheet(() {});
+                  },
+                ),
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Text('强制横屏')),
+                  Transform.scale(
+                    scale: 0.78,
+                    alignment: Alignment.centerRight,
+                    child: Switch(
+                      key: const ValueKey('force-landscape'),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: store.forceLandscape,
+                      onChanged: (v) async {
+                        store.forceLandscape = v;
+                        await _persist(layout: true);
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              Row(
+                children: [
+                  const Expanded(child: Text('减弱动画效果')),
+                  Transform.scale(
+                    scale: 0.78,
+                    alignment: Alignment.centerRight,
+                    child: Switch(
+                      key: const ValueKey('reduce-motion'),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      value: store.reduceMotion,
+                      onChanged: (v) async {
+                        store.reduceMotion = v;
+                        await _persist();
+                        setSheet(() {});
+                      },
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+              SwitchListTile(
+                key: const ValueKey('diagnostic-toggle'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('诊断日志（仅本次运行）'),
+                subtitle: const Text('开启时清空旧日志，重启后自动关闭'),
+                value: DiagnosticLog.enabled,
+                onChanged: (value) async {
+                  await DiagnosticLog.setEnabled(value);
+                  if (ctx.mounted) setSheet(() {});
+                },
+              ),
+              Row(
+                children: [
+                  TextButton(
+                    key: const ValueKey('diagnostic-view'),
+                    onPressed: () async {
+                      final log = await DiagnosticLog.read();
+                      if (!ctx.mounted) return;
+                      await showDialog<void>(
+                        context: ctx,
+                        builder: (context) => AlertDialog(
+                          title: const Text('诊断日志'),
+                          content: SizedBox(
+                            width: double.maxFinite,
+                            child: SingleChildScrollView(
+                              child: SelectableText(log.isEmpty ? '暂无日志' : log),
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(context),
+                              child: const Text('关闭'),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                    child: const Text('查看日志'),
+                  ),
+                  TextButton(
+                    key: const ValueKey('diagnostic-clear'),
+                    onPressed: () async {
+                      final cleared = await DiagnosticLog.clear();
+                      if (ctx.mounted) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          SnackBar(content: Text(cleared ? '日志已清空' : '清空失败')),
+                        );
+                      }
+                    },
+                    child: const Text('清空日志'),
+                  ),
+                ],
+              ),
+              const Divider(height: 1),
+              const SizedBox(height: 16),
+              Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _colorPick(ctx, setSheet, 'monochrome', '黑白'),
-                  _colorPick(ctx, setSheet, 'blue', '蓝色'),
-                  _colorPick(ctx, setSheet, 'pink', '粉色'),
-                  _colorPick(ctx, setSheet, 'green', '绿色'),
-                  _colorPick(ctx, setSheet, 'gold', '金色'),
-                  _colorPick(ctx, setSheet, 'red', '红色'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 20),
-            const Align(alignment: Alignment.centerLeft, child: Text('桌面图标')),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'system', label: Text('跟随系统')),
-                  ButtonSegment(value: 'white', label: Text('默认浅色')),
-                  ButtonSegment(value: 'black', label: Text('沉稳深色')),
-                ],
-                selected: {store.appIcon},
-                onSelectionChanged: (s) async {
-                  store.appIcon = s.first;
-                  await _persist();
-                  _applyAppIcon(store.appIcon);
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Expanded(child: Text('连接后添加全部 IP')),
-                Transform.scale(
-                  scale: 0.78,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    key: const ValueKey('collect-all-ips'),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: store.collectAllIps,
-                    onChanged: (v) async {
-                      store.collectAllIps = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('已连接设备的快捷开关显示在什么地方'),
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              key: const ValueKey('device-strip-placement'),
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'input', label: Text('输入框下方')),
-                  ButtonSegment(value: 'top', label: Text('顶部')),
-                ],
-                selected: {store.deviceStripPlacement},
-                onSelectionChanged: (s) async {
-                  store.deviceStripPlacement = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Text('语音自动发送延迟'),
-                IconButton(
-                  tooltip: '语音自动发送说明',
-                  onPressed: _showVoiceHelp,
-                  visualDensity: VisualDensity.compact,
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints.tightFor(
-                    width: 28,
-                    height: 28,
-                  ),
-                  iconSize: 18,
-                  icon: const Icon(Icons.info_outline),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<int>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 0, label: Text('无延迟')),
-                  ButtonSegment(value: 500, label: Text('0.5 秒')),
-                  ButtonSegment(value: 1000, label: Text('1 秒')),
-                  ButtonSegment(value: 1500, label: Text('1.5 秒')),
-                ],
-                selected: {store.voiceDelayMs},
-                onSelectionChanged: (s) async {
-                  store.voiceDelayMs = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Expanded(child: Text('切换光标设备')),
-                const Text('首页显示'),
-                const SizedBox(width: 6),
-                Transform.scale(
-                  scale: 0.78,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    key: const ValueKey('home-pointer-quick-switch'),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: store.homePointerQuickSwitch,
-                    onChanged: (v) async {
-                      store.homePointerQuickSwitch = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            SizedBox(
-              key: const ValueKey('settings-pointer-mode-sync'),
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'trackpad', label: Text('触控板')),
-                  ButtonSegment(value: 'trackball', label: Text('轨迹球')),
-                  ButtonSegment(value: 'trackpoint', label: Text('小红点')),
-                ],
-                selected: {store.pointerMode},
-                onSelectionChanged: (s) async {
-                  _stopTrackPoint();
-                  store.pointerMode = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Align(alignment: Alignment.centerLeft, child: Text('触控板大小')),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'small', label: Text('小')),
-                  ButtonSegment(value: 'medium', label: Text('中')),
-                  ButtonSegment(value: 'large', label: Text('大')),
-                ],
-                selected: {store.pointerSize},
-                onSelectionChanged: (s) async {
-                  store.pointerSize = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Expanded(child: Text('长按轻震反馈')),
-                Transform.scale(
-                  scale: 0.78,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    key: const ValueKey('long-press-haptic'),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: store.longPressHaptic,
-                    onChanged: (v) async {
-                      store.longPressHaptic = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const Align(alignment: Alignment.centerLeft, child: Text('滚轮位置')),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'left', label: Text('左侧')),
-                  ButtonSegment(value: 'right', label: Text('右侧')),
-                ],
-                selected: {store.wheelSide},
-                onSelectionChanged: (s) async {
-                  store.wheelSide = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Align(alignment: Alignment.centerLeft, child: Text('滚轮方向反转')),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: _platformSwitch(
-                    key: const ValueKey('wheel-reverse-windows'),
-                    label: 'Windows',
-                    value: store.wheelReverseWindows,
-                    onChanged: (v) async {
-                      store.wheelReverseWindows = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _platformSwitch(
-                    key: const ValueKey('wheel-reverse-mac'),
-                    label: 'Mac',
-                    value: store.wheelReverseMac,
-                    onChanged: (v) async {
-                      store.wheelReverseMac = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            const Align(alignment: Alignment.centerLeft, child: Text('指针速度')),
-            const SizedBox(height: 8),
-            _platformSpeedSlider(
-              key: const ValueKey('pointer-speed-windows'),
-              label: 'Windows',
-              value: store.pointerSpeedWindows,
-              gears: PadStore.pointerGears,
-              onChanged: (v) async {
-                store.pointerSpeedWindows = v;
-                await _persist();
-                setSheet(() {});
-              },
-            ),
-            const SizedBox(height: 8),
-            _platformSpeedSlider(
-              key: const ValueKey('pointer-speed-mac'),
-              label: 'Mac',
-              value: store.pointerSpeedMac,
-              gears: PadStore.pointerGears,
-              onChanged: (v) async {
-                store.pointerSpeedMac = v;
-                await _persist();
-                setSheet(() {});
-              },
-            ),
-            const SizedBox(height: 16),
-            const Align(alignment: Alignment.centerLeft, child: Text('滚轮速度')),
-            const SizedBox(height: 8),
-            _platformSpeedSlider(
-              key: const ValueKey('wheel-speed-windows'),
-              label: 'Windows',
-              value: store.wheelSpeedWindows,
-              gears: PadStore.wheelGearsWindows,
-              onChanged: (v) async {
-                store.wheelSpeedWindows = v;
-                await _persist();
-                setSheet(() {});
-              },
-            ),
-            const SizedBox(height: 8),
-            _platformSpeedSlider(
-              key: const ValueKey('wheel-speed-mac'),
-              label: 'Mac',
-              value: store.wheelSpeedMac,
-              gears: PadStore.wheelGears,
-              onChanged: (v) async {
-                store.wheelSpeedMac = v;
-                await _persist();
-                setSheet(() {});
-              },
-            ),
-            const SizedBox(height: 24),
-            const Align(alignment: Alignment.centerLeft, child: Text('指针发送频率')),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: SegmentedButton<int>(
-                key: const ValueKey('pointer-hz'),
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 60, label: Text('60Hz')),
-                  ButtonSegment(value: 120, label: Text('120Hz')),
-                  ButtonSegment(value: 240, label: Text('240Hz')),
-                ],
-                selected: {store.pointerHz},
-                onSelectionChanged: (s) async {
-                  store.pointerHz = s.first;
-                  store.pointerHzManual = true;
-                  _retunePointerCadence();
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            const Align(alignment: Alignment.centerLeft, child: Text('横屏布局')),
-            const SizedBox(height: 8),
-            SizedBox(
-              key: const ValueKey('landscape-pointer-side-setting'),
-              width: double.infinity,
-              child: SegmentedButton<String>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: 'left', label: Text('触控在左')),
-                  ButtonSegment(value: 'right', label: Text('触控在右')),
-                ],
-                selected: {store.landscapePointerSide},
-                onSelectionChanged: (s) async {
-                  store.landscapePointerSide = s.first;
-                  await _persist();
-                  setSheet(() {});
-                },
-              ),
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Expanded(child: Text('强制横屏')),
-                Transform.scale(
-                  scale: 0.78,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    key: const ValueKey('force-landscape'),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: store.forceLandscape,
-                    onChanged: (v) async {
-                      store.forceLandscape = v;
-                      await _persist(layout: true);
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Row(
-              children: [
-                const Expanded(child: Text('减弱动画效果')),
-                Transform.scale(
-                  scale: 0.78,
-                  alignment: Alignment.centerRight,
-                  child: Switch(
-                    key: const ValueKey('reduce-motion'),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    value: store.reduceMotion,
-                    onChanged: (v) async {
-                      store.reduceMotion = v;
-                      await _persist();
-                      setSheet(() {});
-                    },
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            SwitchListTile(
-              key: const ValueKey('diagnostic-toggle'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('诊断日志（仅本次运行）'),
-              subtitle: const Text('开启时清空旧日志，重启后自动关闭'),
-              value: DiagnosticLog.enabled,
-              onChanged: (value) async {
-                await DiagnosticLog.setEnabled(value);
-                if (ctx.mounted) setSheet(() {});
-              },
-            ),
-            Row(
-              children: [
-                TextButton(
-                  key: const ValueKey('diagnostic-view'),
-                  onPressed: () async {
-                    final log = await DiagnosticLog.read();
-                    if (!ctx.mounted) return;
-                    await showDialog<void>(
-                      context: ctx,
-                      builder: (context) => AlertDialog(
-                        title: const Text('诊断日志'),
-                        content: SizedBox(
-                          width: double.maxFinite,
-                          child: SingleChildScrollView(
-                            child: SelectableText(log.isEmpty ? '暂无日志' : log),
+                  InkWell(
+                    key: const ValueKey('settings-version'),
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: checkingUpdate
+                        ? null
+                        : () => _handleUpdateTap(
+                            refresh: () {
+                              if (ctx.mounted) setSheet(() {});
+                            },
                           ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        '版本 $appVersion',
+                        style: TextStyle(
+                          color: _controlForeground(
+                            Theme.of(ctx).brightness,
+                          ).withValues(alpha: 0.6),
+                          fontSize: 13,
                         ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('关闭'),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                  child: const Text('查看日志'),
-                ),
-                TextButton(
-                  key: const ValueKey('diagnostic-clear'),
-                  onPressed: () async {
-                    final cleared = await DiagnosticLog.clear();
-                    if (ctx.mounted) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        SnackBar(content: Text(cleared ? '日志已清空' : '清空失败')),
-                      );
-                    }
-                  },
-                  child: const Text('清空日志'),
-                ),
-              ],
-            ),
-            const Divider(height: 1),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                InkWell(
-                  key: const ValueKey('settings-version'),
-                  borderRadius: BorderRadius.circular(8),
-                  onTap: checkingUpdate
-                      ? null
-                      : () => _handleUpdateTap(
-                          refresh: () {
-                            if (ctx.mounted) setSheet(() {});
-                          },
-                        ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Text(
-                      '版本 $appVersion',
-                      style: TextStyle(
-                        color: _controlForeground(
-                          Theme.of(ctx).brightness,
-                        ).withValues(alpha: 0.6),
-                        fontSize: 13,
                       ),
                     ),
                   ),
-                ),
-                TextButton.icon(
-                  key: const ValueKey('settings-update-action'),
-                  onPressed: checkingUpdate
-                      ? null
-                      : () => _handleUpdateTap(
-                          refresh: () {
-                            if (ctx.mounted) setSheet(() {});
-                          },
-                        ),
-                  icon: checkingUpdate
-                      ? const SizedBox.square(
-                          dimension: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          pendingUpdateTag == null
-                              ? Icons.refresh
-                              : Icons.circle,
-                          size: pendingUpdateTag == null ? 16 : 7,
-                          color: pendingUpdateTag == null
-                              ? null
-                              : const Color(0xFF74B580),
-                        ),
-                  label: Text(
-                    checkingUpdate
-                        ? '检查中...'
-                        : pendingUpdateTag == null
-                        ? '检查更新'
-                        : '可更新',
-                    style: pendingUpdateTag == null
+                  TextButton.icon(
+                    key: const ValueKey('settings-update-action'),
+                    onPressed: checkingUpdate
                         ? null
-                        : const TextStyle(color: Color(0xFF74B580)),
+                        : () => _handleUpdateTap(
+                            refresh: () {
+                              if (ctx.mounted) setSheet(() {});
+                            },
+                          ),
+                    icon: checkingUpdate
+                        ? const SizedBox.square(
+                            dimension: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            pendingUpdateTag == null
+                                ? Icons.refresh
+                                : Icons.circle,
+                            size: pendingUpdateTag == null ? 16 : 7,
+                            color: pendingUpdateTag == null
+                                ? null
+                                : const Color(0xFF74B580),
+                          ),
+                    label: Text(
+                      checkingUpdate
+                          ? '检查中...'
+                          : pendingUpdateTag == null
+                          ? '检查更新'
+                          : '可更新',
+                      style: pendingUpdateTag == null
+                          ? null
+                          : const TextStyle(color: Color(0xFF74B580)),
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ],
+                ],
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    _refreshSettingsSheet = null;
+  }
+
+  Future<void> _applyAppIcon(String iconPref) async {
+    if (!mounted) return;
+    final target = resolveAppIconTarget(
+      iconPref,
+      MediaQuery.platformBrightnessOf(context),
+    );
+    try {
+      await const MethodChannel(
+        'agentpad/ws',
+      ).invokeMethod<bool>('setAppIcon', {'icon': target});
+    } catch (error) {
+      _showIconError(error);
+    }
+    await _loadAppIconState();
+  }
+
+  Future<void> _loadAppIconState() async {
+    try {
+      final raw = await const MethodChannel(
+        'agentpad/ws',
+      ).invokeMethod<Object?>('getAppIconState');
+      if (!mounted || raw is! Map) return;
+      final current = raw['current'];
+      final pending = raw['pending'];
+      setState(() {
+        _appIconCurrent = current == 'black' ? 'black' : 'white';
+        _appIconPending = pending == 'black'
+            ? 'black'
+            : pending == 'white'
+            ? 'white'
+            : null;
+      });
+      _refreshSettingsSheet?.call();
+    } catch (_) {}
+  }
+
+  bool _iconActionRunning = false;
+
+  void _showIconError(Object error) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          '图标变更失败：${error is PlatformException ? error.message ?? error.code : error}',
         ),
       ),
     );
   }
 
-  void _applyAppIcon(String iconPref) {
-    var target = iconPref;
-    if (target == 'system') {
-      final isDark = Theme.of(context).brightness == Brightness.dark;
-      target = isDark ? 'black' : 'white';
+  Future<void> _finishForAppIcon() => _runIconAction('finishWithAppIcon');
+
+  Future<void> _restartForAppIcon() => _runIconAction('restartWithAppIcon');
+
+  Future<void> _runIconAction(String method) async {
+    if (_iconActionRunning) return;
+    _iconActionRunning = true;
+    try {
+      await store.save();
+      if (!mounted) return;
+      await const MethodChannel(
+        'agentpad/ws',
+      ).invokeMethod<bool>('setAppIcon', {
+        'icon': resolveAppIconTarget(
+          store.appIcon,
+          MediaQuery.platformBrightnessOf(context),
+        ),
+      });
+      await const MethodChannel('agentpad/ws').invokeMethod<bool>(method);
+    } catch (error) {
+      _iconActionRunning = false;
+      _showIconError(error);
+      await _loadAppIconState();
     }
-    const MethodChannel(
-      'agentpad/ws',
-    ).invokeMethod<bool>('setAppIcon', {'icon': target});
+  }
+
+  Widget _appIconRestartHint(BuildContext ctx) {
+    final dark = Theme.of(ctx).brightness == Brightness.dark;
+    final red = dark ? Colors.red.shade300 : Colors.red.shade700;
+    final blue = dark ? Colors.blue.shade300 : Colors.blue.shade700;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text.rich(
+        key: const ValueKey('app-icon-restart-hint'),
+        TextSpan(
+          children: [
+            TextSpan(
+              text: '等下次重新启动软件时才会变更',
+              style: TextStyle(color: red),
+            ),
+            const TextSpan(text: '（首页返回退出后生效，切后台不变） '),
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: GestureDetector(
+                key: const ValueKey('app-icon-restart'),
+                onTap: _restartForAppIcon,
+                child: Text(
+                  '立即重启',
+                  style: TextStyle(
+                    color: blue,
+                    decoration: TextDecoration.underline,
+                    decorationColor: blue,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showUpdateNotice(String message) {
@@ -2587,7 +2789,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       }
       if (latest == null) {
         if (mounted && notify) _showUpdateNotice('检查更新失败');
-        unawaited(DiagnosticLog.record(DiagnosticKind.update, DiagnosticStage.check, DiagnosticResult.failed));
+        unawaited(
+          DiagnosticLog.record(
+            DiagnosticKind.update,
+            DiagnosticStage.check,
+            DiagnosticResult.failed,
+          ),
+        );
         return;
       }
       final update = latest;
@@ -3047,13 +3255,14 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                             if (q == null) {
                               if (ctx.mounted) {
                                 ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('无法识别二维码，请确认电脑端已更新')),
+                                  const SnackBar(
+                                    content: Text('无法识别二维码，请确认电脑端已更新'),
+                                  ),
                                 );
                               }
                               return;
                             }
-                            store.devices = upsertDevice(
-                              store.devices,
+                            store.upsert(
                               Device(
                                 deviceId: q.deviceId,
                                 name: q.name,
@@ -3119,7 +3328,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                                   Checkbox(
                                     value: d.selected,
                                     onChanged: (v) {
-                                      d.selected = v ?? true;
+                                      store.selectDevice(d, v ?? true);
                                       _persist();
                                       setSheet(() {});
                                     },
@@ -3130,7 +3339,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                               subtitle: Text(
                                 '${d.ips.join(", ")}:${d.port}'
                                 '${hub?.isOnline(d) == true ? " · 在线" : ""}'
-                                '${d.needsPairing ? " · 被拒绝，请重新扫码或输入配对码" : !d.canAuthenticate ? " · 未配对，请扫码或输入配对码" : ""}',
+                                '${d.needsPairing
+                                    ? " · 被拒绝，请重新扫码或输入配对码"
+                                    : !d.canAuthenticate
+                                    ? " · 未配对，请扫码或输入配对码"
+                                    : ""}',
                               ),
                               onLongPress: () async {
                                 await _confirmDelete(d);
@@ -3207,14 +3420,13 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     final pairCode = code.text.trim();
     if (!isPairCode(pairCode)) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请输入电脑配对窗口显示的 4 位配对码')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('请输入电脑配对窗口显示的 4 位配对码')));
       }
       return;
     }
-    store.devices = upsertDevice(
-      store.devices,
+    store.upsert(
       Device(
         deviceId: '',
         name: name.text.trim().isEmpty ? hp.host : name.text.trim(),
@@ -3604,9 +3816,7 @@ class _ScanPageState extends State<ScanPage> {
               return Center(
                 child: Padding(
                   padding: const EdgeInsets.all(24),
-                  child: Text(
-                    '无法打开相机：${error.errorCode.name}\n请在系统设置里允许相机权限',
-                  ),
+                  child: Text('无法打开相机：${error.errorCode.name}\n请在系统设置里允许相机权限'),
                 ),
               );
             },

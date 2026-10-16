@@ -25,6 +25,7 @@ android {
 
     defaultConfig {
         applicationId = "app.agentspads"
+        manifestPlaceholders["appLabel"] = "AgentsPads"
         testInstrumentationRunner = "app.agentspads.InputConnectionChecks"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
@@ -49,6 +50,10 @@ android {
     }
 
     buildTypes {
+        debug {
+            applicationIdSuffix = ".debug"
+            manifestPlaceholders["appLabel"] = "AgentsPads Debug"
+        }
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")

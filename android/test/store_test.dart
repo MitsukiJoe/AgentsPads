@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -5,6 +7,71 @@ import 'package:agentpad/hub.dart';
 import 'package:agentpad/store.dart';
 
 void main() {
+  test('single target rules preserve zero and existing selection', () async {
+    SharedPreferences.setMockInitialValues({});
+    final store = PadStore();
+    Device device(String id) =>
+        Device(deviceId: id, name: id, ips: [id], port: 9618);
+    store.upsert(device('a'));
+    store.upsert(device('b'));
+    expect(store.activeDevices.map((d) => d.deviceId), ['a']);
+    store.selectDevice(store.devices.last, true);
+    expect(store.activeDevices.map((d) => d.deviceId), ['b']);
+    final stale = store.devices.first;
+    store.upsert(device('a'));
+    expect(store.activeDevices.map((d) => d.deviceId), ['b']);
+    store.selectDevice(stale, true);
+    expect(store.activeDevices.map((d) => d.deviceId), ['a']);
+    store.selectDevice(store.devices.last, true);
+    store.selectDevice(store.devices.last, false);
+    expect(store.activeDevices, isEmpty);
+    store.upsert(device('a'));
+    expect(store.activeDevices, isEmpty);
+    store.upsert(device('c'));
+    expect(store.activeDevices.map((d) => d.deviceId), ['c']);
+    store.limitActiveDevices = false;
+    store.upsert(device('d'));
+    expect(store.devices.last.selected, isFalse);
+    store.selectDevice(store.devices.first, true);
+    await store.save();
+    final restored = PadStore();
+    await restored.load();
+    expect(restored.activeDevices.map((d) => d.deviceId), ['a', 'c']);
+    restored.limitActiveDevices = true;
+    expect(restored.activeDevices.map((d) => d.deviceId), ['a']);
+    await restored.save();
+    await restored.load();
+    expect(restored.limitActiveDevices, isTrue);
+    expect(restored.activeDevices.map((d) => d.deviceId), ['a']);
+  });
+
+  test(
+    'legacy multiple selections load as first selected and zero stays zero',
+    () async {
+      for (final selected in [true, false]) {
+        SharedPreferences.setMockInitialValues({
+          'devices': jsonEncode([
+            for (final id in ['a', 'b', 'c'])
+              Device(
+                deviceId: id,
+                name: id,
+                ips: [id],
+                port: 9618,
+                selected: selected && id != 'a',
+              ).toJson(),
+          ]),
+        });
+        final store = PadStore();
+        await store.load();
+        expect(store.limitActiveDevices, isTrue);
+        expect(
+          store.devices.where((d) => d.selected).map((d) => d.deviceId),
+          selected ? ['b'] : <String>[],
+        );
+      }
+    },
+  );
+
   test('upsert merges by device_id and keeps others', () {
     final a = Device(deviceId: 'a', name: 'A', ips: ['1.1.1.1'], port: 9618);
     final b = Device(deviceId: 'b', name: 'B', ips: ['2.2.2.2'], port: 9618);

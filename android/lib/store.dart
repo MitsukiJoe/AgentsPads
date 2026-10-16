@@ -73,7 +73,9 @@ class Device {
       os: other.os.isNotEmpty ? other.os : os,
       selected: selected,
       secret: other.secret.isNotEmpty ? other.secret : secret,
-      pairCode: (other.secret.isNotEmpty || other.pairCode.isNotEmpty) ? other.pairCode : pairCode,
+      pairCode: (other.secret.isNotEmpty || other.pairCode.isNotEmpty)
+          ? other.pairCode
+          : pairCode,
     );
   }
 }
@@ -156,6 +158,80 @@ List<Shortcut> defaultShortcuts() => [
 
 class PadStore {
   List<Device> devices = [];
+  bool _limitActiveDevices = true;
+  void Function(List<Device>, List<Device>)? onTargetsChanged;
+
+  bool get limitActiveDevices => _limitActiveDevices;
+  set limitActiveDevices(bool value) {
+    final before = activeDevices.toList();
+    _limitActiveDevices = value;
+    _normalizeSelection();
+    _notifyTargets(before);
+  }
+
+  Iterable<Device> get activeDevices {
+    final selected = devices.where((d) => d.selected);
+    return limitActiveDevices ? selected.take(1) : selected;
+  }
+
+  void _normalizeSelection() {
+    if (!limitActiveDevices) return;
+    var found = false;
+    for (final d in devices) {
+      if (!d.selected) continue;
+      if (found) d.selected = false;
+      found = true;
+    }
+  }
+
+  bool _sameTarget(Device a, Device b) =>
+      identical(a, b) ||
+      (a.deviceId.isNotEmpty && a.deviceId == b.deviceId) ||
+      (a.deviceId.isEmpty &&
+          b.deviceId.isEmpty &&
+          a.port == b.port &&
+          a.ips.any(b.ips.contains));
+
+  void _notifyTargets(List<Device> before) {
+    final next = activeDevices.toList();
+    if (before.length != next.length ||
+        before.any((d) => !next.any((n) => _sameTarget(d, n)))) {
+      onTargetsChanged?.call(before, next);
+    }
+  }
+
+  void selectDevice(Device device, bool selected) {
+    final index = devices.indexWhere((d) => _sameTarget(d, device));
+    if (index < 0) return;
+    final before = activeDevices.toList();
+    if (selected && limitActiveDevices) {
+      for (final d in devices) {
+        d.selected = identical(d, devices[index]);
+      }
+    } else {
+      devices[index].selected = selected;
+    }
+    _normalizeSelection();
+    _notifyTargets(before);
+  }
+
+  void upsert(Device device) {
+    final before = activeDevices.toList();
+    final next = upsertDevice(devices, device);
+    if (next.length > devices.length) {
+      device.selected = before.isEmpty;
+    }
+    devices = next;
+    _normalizeSelection();
+    _notifyTargets(before);
+  }
+
+  void removeDevice(Device device) {
+    final before = activeDevices.toList();
+    devices.remove(device);
+    _notifyTargets(before);
+  }
+
   List<Shortcut> shortcuts = defaultShortcuts();
   bool autoEnter = false;
   bool voiceAutoSend = true;
@@ -235,6 +311,7 @@ class PadStore {
     autoEnter = p.getBool('auto_enter') ?? false;
     voiceAutoSend = p.getBool('voice_auto_send') ?? true;
     collectAllIps = p.getBool('collect_all_ips') ?? false;
+    _limitActiveDevices = p.getBool('limit_active_devices') ?? true;
     voiceDelayMs = p.getInt('voice_delay_ms') ?? 500;
     if (!{0, 500, 1000, 1500}.contains(voiceDelayMs)) voiceDelayMs = 500;
     pointerMode =
@@ -323,6 +400,7 @@ class PadStore {
           Device.fromJson((e as Map).cast<String, dynamic>()),
       ];
     }
+    _normalizeSelection();
     final rawKeys = p.getString('shortcuts');
     if (rawKeys != null) {
       final list = jsonDecode(rawKeys) as List;
@@ -335,38 +413,44 @@ class PadStore {
 
   Future<void> save() async {
     final p = await SharedPreferences.getInstance();
-    await p.setBool('auto_enter', autoEnter);
-    await p.setBool('voice_auto_send', voiceAutoSend);
-    await p.setBool('collect_all_ips', collectAllIps);
-    await p.setInt('voice_delay_ms', voiceDelayMs);
-    await p.setString('pointer_mode', pointerMode);
-    await p.setBool('home_pointer_quick_switch', homePointerQuickSwitch);
-    await p.setString('device_strip_placement', deviceStripPlacement);
-    await p.setString('wheel_side', wheelSide);
-    await p.setBool('wheel_reverse_windows', wheelReverseWindows);
-    await p.setBool('wheel_reverse_mac', wheelReverseMac);
-    await p.setString('pointer_size', pointerSize);
-    await p.setInt('pointer_hz', pointerHz);
-    await p.setBool('pointer_hz_manual', pointerHzManual);
-    await p.setDouble('pointer_speed_windows', pointerSpeedWindows);
-    await p.setDouble('pointer_speed_mac', pointerSpeedMac);
-    await p.setDouble('wheel_factor_windows', wheelSpeedWindows);
-    await p.setDouble('wheel_factor_mac', wheelSpeedMac);
-    await p.setString('input_height', inputHeight);
-    await p.setString('landscape_pointer_side', landscapePointerSide);
-    await p.setBool('force_landscape', forceLandscape);
-    await p.setBool('long_press_haptic', longPressHaptic);
-    await p.setBool('reduce_motion', reduceMotion);
-    await p.setString('theme', theme);
-    await p.setString('theme_color', themeColor);
-    await p.setString('app_icon', appIcon);
-    await p.setString(
-      'devices',
-      jsonEncode([for (final d in devices) d.toJson()]),
+    Future<void> write(Future<bool> result) async {
+      if (!await result) throw StateError('无法保存设置');
+    }
+
+    await write(p.setBool('auto_enter', autoEnter));
+    await write(p.setBool('voice_auto_send', voiceAutoSend));
+    await write(p.setBool('collect_all_ips', collectAllIps));
+    await write(p.setBool('limit_active_devices', limitActiveDevices));
+    await write(p.setInt('voice_delay_ms', voiceDelayMs));
+    await write(p.setString('pointer_mode', pointerMode));
+    await write(p.setBool('home_pointer_quick_switch', homePointerQuickSwitch));
+    await write(p.setString('device_strip_placement', deviceStripPlacement));
+    await write(p.setString('wheel_side', wheelSide));
+    await write(p.setBool('wheel_reverse_windows', wheelReverseWindows));
+    await write(p.setBool('wheel_reverse_mac', wheelReverseMac));
+    await write(p.setString('pointer_size', pointerSize));
+    await write(p.setInt('pointer_hz', pointerHz));
+    await write(p.setBool('pointer_hz_manual', pointerHzManual));
+    await write(p.setDouble('pointer_speed_windows', pointerSpeedWindows));
+    await write(p.setDouble('pointer_speed_mac', pointerSpeedMac));
+    await write(p.setDouble('wheel_factor_windows', wheelSpeedWindows));
+    await write(p.setDouble('wheel_factor_mac', wheelSpeedMac));
+    await write(p.setString('input_height', inputHeight));
+    await write(p.setString('landscape_pointer_side', landscapePointerSide));
+    await write(p.setBool('force_landscape', forceLandscape));
+    await write(p.setBool('long_press_haptic', longPressHaptic));
+    await write(p.setBool('reduce_motion', reduceMotion));
+    await write(p.setString('theme', theme));
+    await write(p.setString('theme_color', themeColor));
+    await write(p.setString('app_icon', appIcon));
+    await write(
+      p.setString('devices', jsonEncode([for (final d in devices) d.toJson()])),
     );
-    await p.setString(
-      'shortcuts',
-      jsonEncode([for (final s in shortcuts) s.toJson()]),
+    await write(
+      p.setString(
+        'shortcuts',
+        jsonEncode([for (final s in shortcuts) s.toJson()]),
+      ),
     );
   }
 }
