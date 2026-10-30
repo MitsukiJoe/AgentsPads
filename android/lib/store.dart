@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'pointer.dart';
 import 'protocol.dart';
 
 class Device {
@@ -238,17 +239,17 @@ class PadStore {
 
   /// After connect, merge all LAN IPs from the PC into this device (off by default).
   bool collectAllIps = false;
-  int voiceDelayMs = 500;
+  int voiceDelayMs = 0;
   String pointerMode = 'trackpad';
   bool homePointerQuickSwitch = true;
-  String deviceStripPlacement = 'input';
+  String deviceStripPlacement = 'top';
   String wheelSide = 'right';
   bool wheelReverseWindows = false;
-  bool wheelReverseMac = false;
-  String pointerSize = 'medium';
+  bool wheelReverseMac = true;
+  String pointerSize = 'large';
   int pointerHz = 60;
   var pointerHzManual = false;
-  double pointerSpeedWindows = 3;
+  double pointerSpeedWindows = 6;
   double pointerSpeedMac = 3;
   double wheelSpeedWindows = 1;
   double wheelSpeedMac = 16;
@@ -263,6 +264,23 @@ class PadStore {
   String appIcon = 'system';
 
   Duration get voiceDelay => Duration(milliseconds: voiceDelayMs);
+
+  static const pointerSizes = [
+    'small',
+    'medium',
+    'large',
+    'extraLarge',
+    'adaptive',
+  ];
+  static const pointerSizeLabels = ['小', '中', '大', '加大', '自适应'];
+  static const minimumTrackpadHeight = 104.0;
+
+  double get trackpadHeight => switch (pointerSize) {
+    'small' || 'adaptive' => minimumTrackpadHeight,
+    'large' => 240,
+    'extraLarge' => 344,
+    _ => 136,
+  };
 
   static const pointerGears = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
   static const wheelGearsWindows = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0];
@@ -312,8 +330,8 @@ class PadStore {
     voiceAutoSend = p.getBool('voice_auto_send') ?? true;
     collectAllIps = p.getBool('collect_all_ips') ?? false;
     _limitActiveDevices = p.getBool('limit_active_devices') ?? true;
-    voiceDelayMs = p.getInt('voice_delay_ms') ?? 500;
-    if (!{0, 500, 1000, 1500}.contains(voiceDelayMs)) voiceDelayMs = 500;
+    voiceDelayMs = p.getInt('voice_delay_ms') ?? 0;
+    if (!{0, 500, 1000, 1500}.contains(voiceDelayMs)) voiceDelayMs = 0;
     pointerMode =
         p.getString('pointer_mode') ??
         ((p.getBool('trackpoint') ?? false) ? 'trackpoint' : 'trackpad');
@@ -321,28 +339,31 @@ class PadStore {
       pointerMode = 'trackpad';
     }
     homePointerQuickSwitch = p.getBool('home_pointer_quick_switch') ?? true;
-    deviceStripPlacement = p.getString('device_strip_placement') ?? 'input';
+    deviceStripPlacement = p.getString('device_strip_placement') ?? 'top';
     if (!{'input', 'top'}.contains(deviceStripPlacement)) {
-      deviceStripPlacement = 'input';
+      deviceStripPlacement = 'top';
     }
     wheelSide = p.getString('wheel_side') ?? 'right';
     if (!{'left', 'right'}.contains(wheelSide)) wheelSide = 'right';
     wheelReverseWindows = p.getBool('wheel_reverse_windows') ?? false;
-    wheelReverseMac = p.getBool('wheel_reverse_mac') ?? false;
-    pointerSize = p.getString('pointer_size') ?? 'medium';
-    if (!{'small', 'medium', 'large'}.contains(pointerSize)) {
-      pointerSize = 'medium';
+    wheelReverseMac = p.getBool('wheel_reverse_mac') ?? true;
+    pointerSize = p.getString('pointer_size') ?? 'large';
+    if (pointerSize == 'largest') pointerSize = 'extraLarge';
+    if (!pointerSizes.contains(pointerSize)) {
+      pointerSize = 'large';
     }
     pointerHzManual = p.getBool('pointer_hz_manual') ?? false;
     pointerHz = p.getInt('pointer_hz') ?? 60;
-    if (!{60, 120, 240}.contains(pointerHz)) pointerHz = 60;
-    if (!pointerHzManual && pointerHz == 240) pointerHz = 60;
+    if (!pointerHzGears.contains(pointerHz)) {
+      pointerHz = 60;
+      pointerHzManual = false;
+    }
     final legacyPointerSpeed = p.getDouble('pointer_speed');
     pointerSpeedWindows = coerceGear(
-      (p.getDouble('pointer_speed_windows') ?? legacyPointerSpeed ?? 3)
+      (p.getDouble('pointer_speed_windows') ?? legacyPointerSpeed ?? 6)
           .roundToDouble(),
       pointerGears,
-      3,
+      6,
     );
     pointerSpeedMac = coerceGear(
       (p.getDouble('pointer_speed_mac') ?? legacyPointerSpeed ?? 3)

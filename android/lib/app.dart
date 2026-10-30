@@ -14,11 +14,10 @@ import 'package:flutter/services.dart'
         PlatformException,
         SystemChrome;
 
-import 'package:flutter/foundation.dart' show kDebugMode;
+import 'package:flutter/foundation.dart' show kDebugMode, kProfileMode, kReleaseMode;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import 'hub.dart';
 import 'pointer.dart';
@@ -27,9 +26,13 @@ import 'protocol.dart';
 import 'store.dart';
 import 'touchpad.dart';
 import 'voice_input.dart';
+import 'adaptive_height_column.dart';
+import 'ui_pointer_sampling.dart';
 
 const appVersion = kDebugMode
     ? 'debug'
+    : kProfileMode
+    ? 'profile'
     : String.fromEnvironment('AGENTPAD_VERSION', defaultValue: '0.1.0');
 
 class AndroidUpdateInfo {
@@ -266,11 +269,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   int get _btns => (leftDown ? 1 : 0) | (rightDown ? 2 : 0);
 
-  double get _trackpadHeight => switch (store.pointerSize) {
-    'small' => 104,
-    'large' => 240,
-    _ => 136,
-  };
+  bool get _adaptiveTrackpad =>
+      store.pointerMode == 'trackpad' && store.pointerSize == 'adaptive';
 
   double get _inputBoxHeight => switch (store.inputHeight) {
     'tall' => 196,
@@ -310,11 +310,11 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       unawaited(_applyAppIcon(store.appIcon));
-      if (widget.enableAutomaticUpdateChecks) {
+      if (kReleaseMode && widget.enableAutomaticUpdateChecks) {
         unawaited(_checkAndroidUpdate(notify: false));
       }
     });
-    if (widget.enableAutomaticUpdateChecks) {
+    if (kReleaseMode && widget.enableAutomaticUpdateChecks) {
       updateCheckTimer = Timer.periodic(_updateCheckInterval, (_) {
         if (mounted) unawaited(_checkAndroidUpdate(notify: false));
       });
@@ -358,15 +358,9 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
   }
 
   Future<void> _applyPointerHzDefault() async {
-    // One-shot: older builds read current 60Hz mode and/or left a manual pick.
-    // Re-default from peak supported rate once, then honor later manual choices.
-    final prefs = await SharedPreferences.getInstance();
-    if (!(prefs.getBool('pointer_hz_peak_v1') ?? false)) {
-      store.pointerHzManual = false;
-      await prefs.setBool('pointer_hz_peak_v1', true);
-    }
     if (store.pointerHzManual) return;
     final measured = await NativeWs.displayRefreshHz();
+    if (!mounted || store.pointerHzManual) return;
     final next = pointerHzForDisplay(measured);
     if (store.pointerHz == next) return;
     store.pointerHz = next;
@@ -573,6 +567,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    Widget? portrait;
+    Widget? landscape;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -594,8 +590,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                       display.width > display.height &&
                       constraints.maxWidth >= 640 * textScale &&
                       constraints.maxHeight >= _inputBoxHeight + 160 * textScale
-                  ? _landscapeLayout()
-                  : _portraitLayout(constraints);
+                  ? landscape ??= _landscapeLayout()
+                  : portrait ??= _portraitLayout();
             },
           ),
         ),
@@ -603,27 +599,52 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _portraitLayout(BoxConstraints constraints) => SingleChildScrollView(
+  Widget _pointerScrollLayout({
+    required double minHeight,
+    required List<Widget> children,
+    Key? contentKey,
+  }) => SingleChildScrollView(
     key: const ValueKey('page-scroll'),
     physics: pointerActive ? const NeverScrollableScrollPhysics() : null,
     keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
     child: ConstrainedBox(
-      constraints: BoxConstraints(minHeight: constraints.maxHeight),
-      child: Column(
-        children: [
-          _topBar(),
-          _actionButtons(),
-          _textInput(),
-          if (store.devices.isNotEmpty && store.deviceStripPlacement == 'input')
-            _deviceStrip(),
-          if (store.homePointerQuickSwitch) _pointerModeSelector(),
-          _pointerArea(),
-          _shortcutSection(),
-          _updateFooter(),
-        ],
-      ),
+      constraints: BoxConstraints(minHeight: minHeight),
+      child: _adaptiveTrackpad
+          ? AdaptiveHeightColumn(
+              key: contentKey,
+              fillIndex: children.indexWhere(
+                (child) => child.key == const ValueKey('pointer-area'),
+              ),
+              minimumFillHeight: store.trackpadHeight,
+              children: children,
+            )
+          : Column(key: contentKey, children: children),
     ),
   );
+
+  Widget _sectionBoundary(Widget child) => RepaintBoundary(
+    child: Semantics(container: true, explicitChildNodes: true, child: child),
+  );
+
+  Widget _portraitLayout() {
+    final children = [
+      _sectionBoundary(_topBar()),
+      _sectionBoundary(_actionButtons()),
+      _sectionBoundary(_textInput()),
+      if (store.devices.isNotEmpty && store.deviceStripPlacement == 'input')
+        _deviceStrip(),
+      if (store.homePointerQuickSwitch) _pointerModeSelector(),
+      _pointerArea(),
+      _sectionBoundary(_shortcutSection()),
+      _updateFooter(),
+    ];
+    return LayoutBuilder(
+      builder: (context, constraints) => _pointerScrollLayout(
+        minHeight: constraints.maxHeight,
+        children: children,
+      ),
+    );
+  }
 
   Widget _landscapeLayout() {
     final pointerPane = Expanded(child: _landscapePointerPane());
@@ -636,27 +657,25 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     );
   }
 
-  Widget _landscapePointerPane() => SizedBox.expand(
-    key: const ValueKey('landscape-pointer-pane'),
-    child: SingleChildScrollView(
-      key: const ValueKey('page-scroll'),
-      physics: pointerActive ? const NeverScrollableScrollPhysics() : null,
-      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.manual,
-      child: KeyedSubtree(
-        key: const ValueKey('landscape-pointer-scroll'),
-        child: Column(
-          children: [
-            if (store.devices.isNotEmpty &&
-                store.deviceStripPlacement == 'input')
-              _deviceStrip(),
-            if (store.homePointerQuickSwitch) _pointerModeSelector(),
-            _pointerArea(),
-            _shortcutSection(),
-          ],
+  Widget _landscapePointerPane() {
+    final children = [
+      if (store.devices.isNotEmpty && store.deviceStripPlacement == 'input')
+        _deviceStrip(),
+      if (store.homePointerQuickSwitch) _pointerModeSelector(),
+      _pointerArea(),
+      _shortcutSection(),
+    ];
+    return SizedBox.expand(
+      key: const ValueKey('landscape-pointer-pane'),
+      child: LayoutBuilder(
+        builder: (context, constraints) => _pointerScrollLayout(
+          minHeight: constraints.maxHeight,
+          contentKey: const ValueKey('landscape-pointer-scroll'),
+          children: children,
         ),
       ),
-    ),
-  );
+    );
+  }
 
   Widget _landscapeInputPane() => SizedBox.expand(
     key: const ValueKey('landscape-input-pane'),
@@ -953,7 +972,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
     }
     return SizedBox(
       key: const ValueKey('pointer-area'),
-      height: _trackpadHeight,
+      height: store.trackpadHeight,
       child: padded,
     );
   }
@@ -1017,7 +1036,7 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
         title: const Text('语音自动发送说明'),
         content: const Text(
           'AgentsPads 只在输入框聚焦后检测到 Android 录音活动，或输入法明确声明 voice 模式时，才把本次输入视为语音；手打组字和粘贴不会单独触发。\n\n'
-          '语音结束组字后会按设置等待，默认等待 0.5 秒。保留这段等待，是为了让带有 AI 自动整理排版功能的语音输入法有充裕时间完成文字的排列和重组；等待期间文字继续变化会重新计时。\n\n'
+          '语音结束组字后默认无延迟发送。使用带有 AI 自动整理排版功能的语音输入法时，可以在设置中增加延迟，为文字的排列和重组预留时间；等待期间文字继续变化会重新计时。\n\n'
           'Android 会向普通应用隐藏录音来源。如果其他应用恰好在 AgentsPads 输入框聚焦期间开始录音，理论上仍可能被判为语音。',
         ),
         actions: [
@@ -2090,8 +2109,8 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: SegmentedButton<String>(
                   showSelectedIcon: false,
                   segments: const [
-                    ButtonSegment(value: 'input', label: Text('输入框下方')),
                     ButtonSegment(value: 'top', label: Text('顶部')),
+                    ButtonSegment(value: 'input', label: Text('输入框下方')),
                   ],
                   selected: {store.deviceStripPlacement},
                   onSelectionChanged: (s) async {
@@ -2209,22 +2228,40 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: Text('触控板大小'),
               ),
               const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<String>(
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(value: 'small', label: Text('小')),
-                    ButtonSegment(value: 'medium', label: Text('中')),
-                    ButtonSegment(value: 'large', label: Text('大')),
-                  ],
-                  selected: {store.pointerSize},
-                  onSelectionChanged: (s) async {
-                    store.pointerSize = s.first;
-                    await _persist();
-                    setSheet(() {});
-                  },
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    PadStore.pointerSizeLabels[PadStore.pointerSizes.indexOf(
+                      store.pointerSize,
+                    )],
+                    key: const ValueKey('pointer-size-label'),
+                    textAlign: TextAlign.center,
+                  ),
+                  Slider(
+                    key: const ValueKey('pointer-size-slider'),
+                    value: PadStore.pointerSizes
+                        .indexOf(store.pointerSize)
+                        .toDouble(),
+                    min: 0,
+                    max: (PadStore.pointerSizes.length - 1).toDouble(),
+                    divisions: PadStore.pointerSizes.length - 1,
+                    label:
+                        PadStore.pointerSizeLabels[PadStore.pointerSizes
+                            .indexOf(store.pointerSize)],
+                    semanticFormatterCallback: (v) =>
+                        PadStore.pointerSizeLabels[v.round()],
+                    onChanged: (v) async {
+                      store.pointerSize = PadStore.pointerSizes[v.round()];
+                      await _persist();
+                      setSheet(() {});
+                    },
+                  ),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [Text('小'), Text('自适应')],
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
               Row(
@@ -2358,25 +2395,36 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
                 child: Text('指针发送频率'),
               ),
               const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: SegmentedButton<int>(
-                  key: const ValueKey('pointer-hz'),
-                  showSelectedIcon: false,
-                  segments: const [
-                    ButtonSegment(value: 60, label: Text('60Hz')),
-                    ButtonSegment(value: 120, label: Text('120Hz')),
-                    ButtonSegment(value: 240, label: Text('240Hz')),
-                  ],
-                  selected: {store.pointerHz},
-                  onSelectionChanged: (s) async {
-                    store.pointerHz = s.first;
-                    store.pointerHzManual = true;
-                    _retunePointerCadence();
-                    await _persist();
-                    setSheet(() {});
-                  },
-                ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '${store.pointerHz} Hz',
+                    key: const ValueKey('pointer-hz-label'),
+                    textAlign: TextAlign.center,
+                  ),
+                  Slider(
+                    key: const ValueKey('pointer-hz'),
+                    value: pointerHzGears.indexOf(store.pointerHz).toDouble(),
+                    min: 0,
+                    max: (pointerHzGears.length - 1).toDouble(),
+                    divisions: pointerHzGears.length - 1,
+                    label: '${store.pointerHz} Hz',
+                    semanticFormatterCallback: (v) =>
+                        '${pointerHzGears[v.round()]} Hz',
+                    onChanged: (v) async {
+                      store.pointerHz = pointerHzGears[v.round()];
+                      store.pointerHzManual = true;
+                      _retunePointerCadence();
+                      await _persist();
+                      setSheet(() {});
+                    },
+                  ),
+                  const Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [Text('60 Hz'), Text('960 Hz')],
+                  ),
+                ],
               ),
               const SizedBox(height: 24),
               const Align(alignment: Alignment.centerLeft, child: Text('横屏布局')),
@@ -2946,56 +2994,59 @@ class _HomePageState extends State<HomePage> with WidgetsBindingObserver {
       barrierColor: Colors.black.withValues(alpha: 0.45),
       transitionDuration: const Duration(milliseconds: 220),
       pageBuilder: (ctx, animation, secondaryAnimation) {
-        return SafeArea(
-          child: LayoutBuilder(
-            builder: (ctx, constraints) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 20,
-                  vertical: 24,
-                ),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: BoxConstraints(
-                      maxWidth: 480,
-                      maxHeight: (constraints.maxHeight - 48).clamp(200, 1200),
-                    ),
-                    child: Material(
-                      elevation: 8,
-                      color: Theme.of(ctx).scaffoldBackgroundColor,
-                      borderRadius: BorderRadius.circular(16),
-                      clipBehavior: Clip.antiAlias,
-                      child: StatefulBuilder(
-                        builder: (ctx, setSheet) => Stack(
-                          children: [
-                            SingleChildScrollView(
-                              key: scrollKey,
-                              padding: const EdgeInsets.fromLTRB(
-                                20,
-                                56,
-                                20,
-                                28,
+        return UiPointerSampling(
+          refreshRate: NativeWs.displayRefreshHz,
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (ctx, constraints) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 24,
+                  ),
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: 480,
+                        maxHeight: (constraints.maxHeight - 48).clamp(200, 1200),
+                      ),
+                      child: Material(
+                        elevation: 8,
+                        color: Theme.of(ctx).scaffoldBackgroundColor,
+                        borderRadius: BorderRadius.circular(16),
+                        clipBehavior: Clip.antiAlias,
+                        child: StatefulBuilder(
+                          builder: (ctx, setSheet) => Stack(
+                            children: [
+                              SingleChildScrollView(
+                                key: scrollKey,
+                                padding: const EdgeInsets.fromLTRB(
+                                  20,
+                                  56,
+                                  20,
+                                  28,
+                                ),
+                                child: _sectionBoundary(builder(ctx, setSheet)),
                               ),
-                              child: builder(ctx, setSheet),
-                            ),
-                            Positioned(
-                              top: 10,
-                              right: 10,
-                              child: IconButton.filledTonal(
-                                key: closeKey,
-                                tooltip: closeTooltip,
-                                onPressed: () => Navigator.pop(ctx),
-                                icon: const Icon(Icons.close),
+                              Positioned(
+                                top: 10,
+                                right: 10,
+                                child: IconButton.filledTonal(
+                                  key: closeKey,
+                                  tooltip: closeTooltip,
+                                  onPressed: () => Navigator.pop(ctx),
+                                  icon: const Icon(Icons.close),
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
                       ),
                     ),
                   ),
-                ),
-              );
-            },
+                );
+              },
+            ),
           ),
         );
       },

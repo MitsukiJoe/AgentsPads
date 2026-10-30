@@ -1,11 +1,11 @@
-/// Map a measured display refresh rate to the default pointer send tier.
-/// 90+ → 120; otherwise nearer of 60 / 120; invalid → 60. Manual 240 is separate.
+const pointerHzGears = [60, 120, 240, 320, 480, 560, 960];
+
 int pointerHzForDisplay(double? refreshRate) {
   if (refreshRate == null || !refreshRate.isFinite || refreshRate <= 0) {
     return 60;
   }
-  if (refreshRate >= 90) return 120;
-  return (refreshRate - 60).abs() <= (refreshRate - 120).abs() ? 60 : 120;
+  final target = refreshRate * 2;
+  return pointerHzGears.lastWhere((hz) => hz <= target, orElse: () => 60);
 }
 
 class PointerCoalescer {
