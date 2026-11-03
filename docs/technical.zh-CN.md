@@ -91,6 +91,5 @@ AgentsPads/
 │   └── technical.en.md       # English
 ├── LICENSE
 ├── README.md
-├── README.en.md
-└── README.zh-CN.md
+└── README.en.md
 ```
