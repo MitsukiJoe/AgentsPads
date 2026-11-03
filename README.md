@@ -2,320 +2,268 @@
 
 <!-- Banner / Meme -->
 <p align="center">
-  <img src="assets/meme-en.jpg" alt="AgentsPads Banner" width="420" />
+  <img src="assets/meme-cn.jpg" alt="AgentsPads Banner" width="420" />
 </p>
 
 # AgentsPads
 
-**Hands off the keyboard and mouse. Pick up your phone as the ultimate command surface — lean back, kick your feet up, or relax on the sofa while your AI Agent works at full throttle!**
+**双手离开键鼠，拿起手机化身全能遥控器 —— 坐着、躺着、翘着腿，你的 AI Agent 照样全速开工！**
 
 <p align="center">
-  <b>🇺🇸 English</b> | <a href="README.zh-CN.md">🇨🇳 简体中文</a>
+  <img src="assets/readme/language.svg" width="25" height="20" align="absmiddle" alt="语言" />&nbsp;：&nbsp; <b><img src="https://cdn.jsdelivr.net/npm/@tabler/flags@0.1.1/dist/shiny/china.svg" width="25" height="20" align="absmiddle" alt="中国国旗" /> 简体中文</b>&nbsp; | &nbsp;<a href="README.en.md"><img src="https://cdn.jsdelivr.net/npm/@tabler/flags@0.1.1/dist/shiny/united-states.svg" width="25" height="20" align="absmiddle" alt="美国国旗" /> English</a>
 </p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL--3.0-blue.svg" alt="License: AGPL-3.0" /></a>
-  <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Android-blueviolet" alt="Platform: Windows | macOS | Android" />
-  <img src="https://img.shields.io/badge/Network-LAN%20Only-green" alt="Network: LAN Only" />
-  <img src="https://img.shields.io/badge/Account-None-lightgrey" alt="Account: None" />
-  <img src="https://img.shields.io/badge/Workflow-Comfort--First-brightgreen" alt="Comfort-first workflow" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-AGPL--3.0-blue" alt="许可证：AGPL-3.0" /></a>
+  <img src="https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-Windows%20%7C%20macOS%20%7C%20Android-blueviolet" alt="平台：Windows | macOS | Android" />
+  <img src="https://img.shields.io/badge/%E7%BD%91%E7%BB%9C-%E5%AE%89%E5%85%A8%E5%B1%80%E5%9F%9F%E7%BD%91-green" alt="网络：安全局域网" />
+  <img src="https://img.shields.io/badge/%E8%B4%A6%E5%8F%B7-%E6%97%A0%E9%9C%80%E6%B3%A8%E5%86%8C-lightgrey" alt="账号：无需注册" />
+  <img src="https://img.shields.io/badge/%E4%BD%BF%E7%94%A8%E6%96%B9%E5%BC%8F-%E8%88%92%E9%80%82%E4%BC%98%E5%85%88-brightgreen" alt="使用方式：舒适优先" />
 </p>
 
-[Download latest](https://github.com/MitsukiJoe/AgentsPads/releases/latest) · [Features](#features) · [Usage](#usage) · [Build](#build) · [FAQ](#faq)
+<p align="center">
+  <a href="https://github.com/MitsukiJoe/AgentsPads/releases/latest"><img src="assets/readme/download-zh.svg" width="168" height="44" alt="下载最新版" /></a>
+</p>
+
+[功能](#功能) · [使用](#使用) · [构建](docs/technical.zh-CN.md#构建) · [常见问题](#常见问题) · [技术文档](docs/technical.zh-CN.md) · [反馈问题](https://github.com/MitsukiJoe/AgentsPads/issues)
 
 </div>
 
-> **"Wait! Are you still hunching over your desk like a medieval monk, glued to your monitor for ten hours straight?!"**  
-> Stiff neck? Sore shoulders? Lumbar muscle strain? That herniated disc sounding alarm bells?  
-> We're in the AI era — why on earth are you still sacrificing your spine just to hit Enter on an Agent confirmation every five minutes?!  
-> **Stop! You don't have to suffer like this!**  
-> Introducing **AgentsPads** — the dedicated remote "walkie-talkie" built for desktop AI Agents!
+> **「等等！你还在每天像个“不是，哥们.jpg”一样，在电脑屏幕前弓腰十几个小时吗？！」**  
+> 颈椎僵硬？肩周酸痛？腰肌劳损？腰椎间盘突出！？  
+> 难道进入了 AI 时代，我们还得为了每隔几分钟给桌面上跑着的 Agent 敲个回车确认，而献祭掉自己的整条脊椎！？  
+> **快停下！你不需要这样受罪！**  
+> 隆重向你推荐 **AgentsPads** —— 专为 AI Agent 时代打造的「遥控对讲机」！
 >
-> *" 🕺 Better use AgentsPads! "*
+> 「 🕺 Better use AgentsPads! 」
 
 ---
 
-> **Notice**:  
-> AgentsPads operates strictly over your local network — it is not a remote desktop, and zero data goes through any cloud relay.  
-> Please keep your computer unlocked and place the cursor in the field where you want input to land.  
-> macOS requires Accessibility permissions (otherwise system keystroke and cursor injection cannot function).  
-> The desktop daemon natively supports Windows and macOS; the mobile client is Android.
-> My neck and back filed a workplace complaint, so I built this.
+> **说明**：  
+> AgentsPads 纯走局域网，不是远程桌面，绝不经云端转发。  
+> 请保持电脑处于解锁状态，并将输入光标提前点在要接收文字的位置。  
+> macOS 系统需要开启辅助功能权限（否则系统按键与光标无法注入）。  
+> 桌面端目前原生支持 Windows 与 macOS，手机端为 Android。
+> 该项目是我为了缓解我自己的职业病疼痛而创建的。
 
 ---
 
 
 <p align="center">
-  <img src="assets/social-preview/en-white.png" alt="AgentsPads preview" width="672" />
+  <img src="assets/social-preview/zh-white.png" alt="AgentsPads 界面预览" width="672" />
 </p>
 
-## Why AgentsPads? — Stop the Desk Strain, Command from Comfort!
+## 为什么要用 AgentsPads？—— 告别工伤，躺平掌权！
 
-You bought the most expensive ergonomic chair, yet you're still stuck leaning forward, hunching over your keyboard all day?
+你买了最贵的人体工学椅，却依然逃不过脖子前倾弓着腰伏案敲键盘的命运？
 
-With AgentsPads, you can stay ten feet away from your desk:
+有了 AgentsPads，你可以彻底离开电脑桌三米远：
 
-- **Lean all the way back in your ergonomic chair**, or kick your feet up on the desk;
-- **Or collapse flat on the sofa across the room**;
-- Step away from the screen, ditch the keyboard and mouse, and hold just your phone to command any Agent on your computer like a walkie-talkie!
+- **尽情仰靠在人体工学椅上**，甚至把双腿大摇大摇地翘到办公桌上；
+- **或者直接往办公室后面的沙发上四仰八叉一躺**；
+- 离开屏幕、甩开键盘鼠标，手里只握着手机，就能像拿着对讲机一样随心所欲指挥电脑上的任何 Agent！
 
-It keeps the conversation with your Agents moving while giving you fewer reasons to stay hunched over the keyboard all day.
+不仅能提升与 Agent 来回沟通的效率，也能减少长时间弓腰守在键盘前的机会！
 
-And it doesn't stop at commanding Agents.  
-While your Agent is grinding through code or running deep research in the background and you want to chill with some videos? **You don't even have to get up!**  
-Use the **trackpad, trackball, or pointing stick** at the bottom of your phone screen to switch windows, open your browser, jump to YouTube or a streaming site, and voice-search what you want to watch — **many everyday actions no longer require a trip back to the keyboard.**
-
----
-
-<a id="features"></a>
-
-## Core Features
-
-AgentsPads is a hands-off input solution built for the Agent era — a dedicated "remote control + walkie-talkie" for your desktop.  
-Voice is just one pathway, not the whole story.  
-Once the target has focus, typing, custom shortcuts, and pointer controls can continue from your phone.
-AI Agents are the prime use case, but the same workflow also applies to browser research, chat replies, and most ordinary windows that accept keyboard and pointer input.
-
-#### Text Input
-
-- **Command from across the room** — Sit comfortably on the other side of the room. Speech, typing, tapping shortcuts, and moving the cursor all happen on your phone. When an Agent asks "Which option do you want?", you can answer without heading back to the desk for every keystroke.
-- **Voice typing, walkie-talkie style** — Dictate using Gboard or your favorite voice-enabled Android keyboard. Transcribed text automatically lands at the desktop cursor once speech stabilizes. Stability delay is configurable: instant (no delay), 0.5s, 1s, or 1.5s (0.5s default). This pause gives voice keyboards with AI formatting and punctuation restructuring enough time to finalize and polish the transcript. You can also turn off auto-send to review and edit before sending.
-- **Dedicated send button** — True send control — you decide when the buffer goes out. Auto-send can stay enabled for an instant walkie-talkie flow, or stay disabled when you want to refine drafts first.
-- **Typing is a first-class citizen** — Skip the microphone whenever you prefer. Draft and refine on your phone screen, then hit send. Especially useful in noisy environments, when prompt phrasing must be exact, or when your attention is already on the phone.
-- **No desktop IME re-composition** — Text finishes composition on your mobile keyboard. Once placed on the desktop clipboard, it is pasted at the caret using native system shortcuts (`Cmd+V` or `Ctrl+V`). The desktop OS receives a clean paste command, not a sequence of simulated keystrokes that might trigger IME candidates or unwanted autocompletion.
-- **Shortcut keys right under your thumb** — When an Agent stops and waits for Esc, Enter, or Shift+Enter, tap the row below the input box. Key bindings can be customized and expanded freely without being locked into any specific agent tool.
-- **Genuine system key injection** — Shortcuts inject real keydown and keyup events into the operating system, rather than pasting dummy characters into the box. Esc actually cancels, Enter actually confirms, and Shift+Enter triggers whatever the target application binds it to.
-- **Empty-box Backspace reaches the desktop** — When the phone input box is focused and empty, Backspace injects a real system Backspace on every checked computer, deleting whatever sits before the desktop caret. If the box still has text, Backspace only edits the phone-side draft. Soft keyboards and hardware keys both take this path.
-- **Empty-box Send button becomes an Enter key** — Same "is the box empty?" check: when the input box holds no text, the paper-plane icon on the Send button swaps to a return-arrow icon, and tapping it injects a single real Enter on every checked computer, so you don't have to hunt for it in the shortcut row. The moment any text appears, the icon flips back to the paper plane and the button goes back to sending text.
-- **Optional automatic Enter** — After text lands, AgentsPads can automatically press Enter so the Agent gets straight to work. After a successful paste, it waits 80ms to let the focused application consume the paste before firing Enter; normal text sync and manual Enter shortcuts are not delayed. If the Agent is asking you to pick an option rather than submit, simply toggle this switch off.
-- **Undo last input** — Sent the wrong prompt? Tap to send `Ctrl+Z` / `Cmd+Z` to the desktop to undo in standard text fields (terminals and command lines may not support this undo depending on host configuration).
-
-#### Cursor & Pointer Controls
-
-- **Trackpad** — Single-finger move and tap to click, hold and move to drag, hold with slight movement or two-finger tap for right-click, and two-finger vertical swipe to scroll.
-- **Trackball** — Roll the virtual glossy red ball for smooth relative pointer movement, with integrated left/right buttons and scroll wheel on the same compact base.
-- **Pointing Stick** — Press and nudge the center directional nub for continuous relative motion. Buttons, scroll wheel, and base footprint match the trackball layout, ensuring zero layout shift when switching modes.
-- **True double and triple clicks** — Consecutive taps in the same place within a short window carry the system single / double / triple-click count, so macOS can select a word or a line. A drag breaks the sequence and will not be counted as a double-click.
-- **Optional long-press haptic** — The trackpad can give a light haptic tap when a long-press arms drag or right-click. It is on by default and can be turned off in settings.
-- **Reversible scroll wheel side** — Switch the scroll wheel to the left or right side in settings; trackpad, trackball, and pointing stick adapt together.
-- **Configurable pointer & wheel speeds** — Adjust Windows and macOS independently. Pointer speed ranges from ×1 to ×7 on both platforms (default ×3). Wheel speed ranges from ×1 to ×7 on Windows (default ×1), and offers ×4 / ×8 / ×12 / ×16 / ×20 / ×24 / ×28 on macOS (default ×16). Sliders display the actual multipliers, and scroll direction can be reversed separately for each platform.
-- **Trackpad height tiers** — Small, Medium, and Large presets adjust trackpad height only; trackball and pointing stick retain their intrinsic compact height.
-- **Landscape split and lock** — In landscape with enough width, the pointer pane and the input pane sit side by side. Settings choose whether the pointer sits on the left or the right (right by default), and a "Force landscape" switch can lock the orientation.
-
-#### Additional Capabilities
-
-- **Multitask while Agents work** — Want to pass the time while the Agent crunches through tasks? Use the virtual trackpad, trackball, or pointing stick to switch over to your browser, open YouTube or streaming sites, and use voice input to search videos — all without getting off the couch.
-- **Landscape pairing window with a first-run guide** — The desktop pairing window uses a landscape layout with three tabs: Pairing, Settings, and About. The Pairing tab shows the QR code on the left and the copyable address, pairing code, and adapter list on the right; Settings gathers launch at login, diagnostic logs, and the pairing-key reset; About shows the version, license, update status, and this computer's device details. A connection guide pops up once on first launch, and the ⓘ button in the upper-left corner brings it back at any time.
-- **Active NIC switching beside the QR code** — Computers may have Ethernet, Wi-Fi, tunnel, or virtual-network adapters enabled at the same time. The pairing window lists only adapters reported as active that have a candidate IPv4 address suitable for a local or virtual-network connection, labels them as Ethernet, Wi-Fi, tunnel, or virtual adapter and sorts them in that order. Select the one your phone can reach in the adapter list to the right of the QR code, and both the QR code and the copyable address follow it. With many adapters the list scrolls internally while the window size stays fixed.
-- **Desktop listener on all interfaces** — The server listens on `0.0.0.0:9618` rather than binding only the primary adapter. A selected address can accept connections when it is reachable and the local firewall allows TCP 9618.
-- **Scan without a code, or type the address plus a pairing code** — The QR code carries the pairing key, so a single scan completes pairing. If you would rather not use the camera, copy the `IP:port` from the pairing window to the phone and enter the 4-digit one-time pairing code shown in the same window. The code is valid only while the pairing window is visible and is replaced after each use; 5 wrong attempts in total lock it until you click "New code" on the computer.
-- **Only paired phones get in** — On every connection the computer sends a random challenge and the phone answers with an HMAC computed from the pairing key; the computer processes no input until the check passes. "Reset pairing key" on the pairing window's Settings tab (click again to confirm) revokes every paired phone at once.
-- **Manage multiple computers from one phone** — Keep laptops and desktops connected at the same time. Scanning another machine appends it to your device list without kicking existing connections. The target strip quickly chooses which computers receive the current input. It sits below the input box by default, and settings can move it next to "Connected" in the top bar.
-- **Rename, edit IP, and manual addition** — Tap "Connected" in the upper-left corner to open the device-management dialog, where you can rename devices, update IPs, refresh connections, add devices with `+`, reorder, or delete.
-- **Local LAN only, zero accounts** — Complete privacy: no registration, no login, no cloud relays.
-- **Auto-reconnect on screen wake** — Waking your phone from sleep automatically re-polls the saved address pool to restore the link.
-- **Quiet update checks** — All three clients share one check rhythm: silent background checks after launch and every 24 hours. A newer release appears as a quiet in-app indicator; the confirmation dialog opens only after you choose to view the update, and nothing downloads until you confirm.
-- **User-controlled launch at login** — The Settings tab of the desktop pairing window provides a launch-at-login toggle that is off by default. Windows registers it through the Startup folder; packaged macOS apps use a LaunchAgent. Disabling the toggle removes the corresponding login entry.
-- **Windows administrator mode (optional)** — Windows running with administrator rights, such as Task Manager, reject keys and pointer input injected by ordinary programs. Turn on "Launch as administrator" in Settings and approve one UAC prompt, and AgentsPads restarts as administrator; from then on, both launch at login and manual launches run as administrator without further prompts. After you turn it off, the next launch returns to normal privileges. Administrator mode uses its own pairing key, stored in a directory only administrators can access, so your phone needs to scan the QR code again after you turn it on and after you turn it off (it is still the same computer entry). In administrator mode, the theme, the first-run guide flag, and diagnostic logs are kept in `%ProgramFiles%\AgentsPads\state`. In administrator mode, launch at login is handled by a highest-privilege scheduled task with a logon trigger (about a 30-second delay), so AgentsPads starts directly as administrator after you sign in, and the toggle can be changed right in the administrator window; after you turn administrator mode off, launch at login returns to the normal setting from before administrator mode was turned on.
-- **Friendly with Remote Desktop and Virtual LANs** — Accessing a remote desktop from outside, or connecting phone and PC via ZeroTier, Tailscale, or a similar virtual LAN? Active tunnel and virtual-network adapters appear in the pairing window so the QR and copyable address can follow the selected route. Inactive adapters are hidden, and common Docker or VM interfaces that can be clearly identified as machine-local are filtered out.
-- **Saved candidate address pool** — Optionally save multiple candidate IPs per machine (Wi-Fi, Ethernet, secondary adapters). When switching networks, the phone retries the pool automatically without relying on unreliable UDP broadcasts.
+当然，它的本领可远不止使唤 Agent。  
+当你的 Agent 正在后台疯狂跑代码、查资料，而你想趁机摸鱼看点视频打发时间？**根本不用爬起来碰电脑！**  
+直接用手机底部的**触控板、轨迹球或经典小红点**划动光标，在电脑上切到浏览器、点开你最爱的视频网站，再用语音输入搜索想看的视频——**很多常见操作不用再回到键盘前！**
 
 ---
 
-<a id="usage"></a>
 
-## Quick Start (3 Simple Steps)
 
-### 1. Download
+<a id="功能"></a>
 
-Open the [Latest Release](https://github.com/MitsukiJoe/AgentsPads/releases/latest) for release notes, or download the latest stable build for your system:
+## 核心招牌特性
+
+AgentsPads 是 Agent 时代下另一套脱离键鼠的输入方案，你电脑专属的 "遥控器 + 对讲机"。  
+语音只是其中一条路，不是全部。  
+输入焦点就位后，打字、自定义快捷键和指针操作都可以继续在手机上完成。
+Agent 是最佳用例；浏览器查资料、聊天框回消息，以及大多数接受普通键盘鼠标输入的窗口也能使用。
+
+#### 文字输入
+
+- **躺着指挥** — 人可以坐在房间另一头。说话、打字、点快捷键、划鼠标都在手机上完成。Agent 一问「选哪个」，不必每次都爬起来按键盘。
+- **中文语音，对讲机式** — 用你最喜欢的语音输入法说话。语音文本可在稳定后自动落到电脑光标处，延迟可选无延迟、0.5 秒、1 秒或 1.5 秒，默认 0.5 秒；这段等待让带有 AI 自动整理排版功能的语音输入法有时间完成文字的排列和重组。也可关掉自动发送，先修改后再发。
+- **独立发送按钮** — 真正的发送，由你决定缓冲区什么时候出门。语音自动发送可以开着当对讲机，也可以关掉，先编辑再发。
+- **打字同样是主路径** — 可以不用麦克风。在手机上改好再按发送。房间吵、措辞必须精确、或注意力已经留在手机上时，这条路更顺。
+- **电脑输入法不二次组字** — 文字在手机上完成组字，写入电脑剪贴板后，再用完整的系统粘贴快捷键（`Cmd+V` 或 `Ctrl+V`）落到光标处。电脑输入法收到的是粘贴命令，不是会弹出中文或日文候选框的普通字母 `v`。
+- **快捷键就在手边** — Agent 停下来等人按 Esc、Enter、Shift+Enter 时，点输入框下面那一排。绑定可以改、可以加。不同 Agent 快捷键不同，这一排不写死某一家。
+- **真正的按键注入** — 快捷键是电脑上的按下/抬起，不是往输入框里粘假字符。Esc 能取消，Enter 能确认，Shift+Enter 走该软件自己的绑定。
+- **空框退格直达电脑** — 输入框聚焦且没有字时，再按退格会向已勾选电脑注入真实的 Backspace，用来删光标前的内容；框里还有字时，退格只改手机本地文本。系统软键盘与实体按键都走这条路径。
+- **空框时发送键变回车键** — 沿用同一条「框里有没有字」的判定：输入框为空时，发送键的小飞机会换成回车图标，此时点它就是向已勾选电脑注入一次真实的 Enter，不必再去快捷键条里找。框里一有字，图标立刻切回小飞机，行为也恢复成发送文字。
+- **可选电脑自动回车** — 文字落地后可以再帮你按一次 Enter，让 Agent 立刻开工。粘贴成功后会先等待 80ms 再自动回车，让当前焦点应用先处理完粘贴；普通文字同步和手动 Enter 快捷键不受这段等待影响。它在问你「选哪个」而不是「提交」时，也可以把这个开关关掉。
+- **撤回上次输入** — 会向电脑发送 `Ctrl+Z` / `Cmd+Z`，普通文本框里可一键撤回；终端和命令行可能不支持这种撤销。
+
+
+
+#### 掌管光标
+
+- **触控板** — 单指移动和单击，长按后移动直接拖拽，长按微动或双指点按是右键，双指上下滑动是滚轮。
+- **轨迹球** — 拖动中间的光泽红球做相对移动，左右键和滚轮都在同一块底座上。
+- **小红点** — 按住中心热区往方向推保持移动。按键、滚轮和底座与轨迹球完全同尺寸，切换时不抖动。
+- **连续点按是真双击** — 短时间内在同一位置连点，电脑收到系统单击 / 双击 / 三击计数；macOS 上可用来选中词或整行。拖拽会打断连点，不会误当成双击。
+- **长按轻震** — 触控板长按进入拖拽或右键前可轻震一次，默认开启，设置里可关。
+- **滚轮跟手换边** — 设置里选左侧或右侧，触控板、轨迹球、小红点一起切换。
+- **指针与滚轮速度** — Windows 与 macOS 可分别调节；两端指针均为 ×1–×7（默认 ×3），Windows 滚轮为 ×1–×7（默认 ×1），macOS 滚轮为 ×4 / ×8 / ×12 / ×16 / ×20 / ×24 / ×28（默认 ×16）。档位标真实倍数，滚动方向也可按平台分别反转。
+- **触控板大小** — 小、中、大三档只改触控板高度；轨迹球与小红点保持紧凑固有尺寸，不跟档位变高。
+- **横屏分栏与强制横屏** — 手机横过来且宽度足够时，指针区与输入区左右分栏；设置里可选触控在左或在右（默认在右），也可打开「强制横屏」锁住方向。
+
+
+
+#### 其他功能
+
+- **一边派活一边摸鱼** — Agent 在电脑里干活的时候，想切到 B 站打发时间？用下方的触控板、轨迹球或小红点直接操纵鼠标切换到浏览器，再用语音输入搜你想看的东西——全程你可以在沙发上进行。
+- **横向配对窗与首次引导** — 桌面配对窗为横向布局，分「配对 / 设置 / 关于」三页：配对页左侧是二维码，右侧是可复制地址、配对码与网卡列表；设置页集中开机启动、诊断日志与重置配对密钥；关于页显示版本、开源许可、更新状态与本机设备信息。首次打开会弹出一次连接引导，之后随时点左上角 ⓘ 按钮即可再次查看。
+- **二维码旁切换活跃网卡** — 电脑常常同时启用有线、Wi-Fi、隧道或虚拟组网。配对窗只列出系统报告为活跃、且具有适合局域网或虚拟组网连接的候选 IPv4 的网卡，按以太网、Wi-Fi、隧道、虚拟网卡分类标注并依次排列；在二维码右侧的网卡列表中选中手机能通的那张，二维码与可复制地址随之切换。网卡较多时列表内部滚动，窗口尺寸不变。
+- **电脑监听所有网卡** — 服务端监听 `0.0.0.0:9618`，不绑死第一张网卡；选中的地址在网络可达且防火墙放行 TCP 9618 时可用于连接。
+- **扫码免输码，填地址输配对码** — 二维码里带着配对密钥，扫一下即完成配对。不想打开相机时，可复制配对窗的 `IP:端口` 到手机，再输入配对窗显示的 4 位一次性配对码。配对码仅在配对窗显示期间有效，用过即换新；累计输错 5 次会锁定，需在电脑上点「换一个」。
+- **只认已配对的手机** — 每次连接电脑都会先发随机挑战，手机用配对密钥计算 HMAC 应答；校验通过前电脑不处理任何输入。配对窗「设置」页的「重置配对密钥」（需再点一次确认）可一次作废所有已配对手机。
+- **一部手机盯多台电脑** — 笔记本和台式可以同时连着。再扫另一台设备就是加机器，不会把已有连接踢掉。设备目标条用于快速勾选哪些电脑响应当前输入，默认在输入框下方，设置里也可改到顶栏「已连接」旁边。
+- **可改名、改 IP、手动加** — 点击左上角「已连接」打开设备管理弹窗，可修改显示名和地址、刷新连接、用 `+` 手动添加设备，也可排序或删除。
+- **只走局域网，没有账号** — 保护你的隐私：不上传、不登录、不经云中继。
+- **息屏再亮仍会重连** — 手机从黑屏回来，会再走一遍已保存的地址池。
+- **不扰人的更新** — 三端同一套节奏：启动后与每满 24 小时在后台静默检查，发现新版只在界面安静提示，不弹任何窗口打断你的操作与思路；点一下才真正开始下载。
+- **桌面端开机启动可控** — 配对窗「设置」页提供「开机启动」开关，默认关闭；Windows 通过 Startup 启动目录、macOS 打包 App 通过 LaunchAgent 注册，关闭后移除对应登录项。
+- **Windows 管理员模式（可选）** — 任务管理器等以管理员权限运行的窗口会拒绝普通程序注入的按键与指针。在「设置」页打开「以管理员模式启动」并授权一次 UAC 后，AgentsPads 会以管理员身份重启；之后开机自启和手动打开都直接以管理员身份运行，不再弹窗。关闭后下次启动恢复普通权限。管理员模式使用独立的配对密钥，存放在仅管理员可访问的目录，因此首次开启和关闭后，手机都需要重新扫码配对一次（同一台电脑仍是同一个设备）。管理员模式下，主题、首次引导记录和诊断日志保存在 `%ProgramFiles%\AgentsPads\state`。管理员模式下「开机启动」由一个带登录触发（延迟约 30 秒）的最高权限计划任务负责，登录后直接以管理员身份启动，开关在管理员窗口里可直接修改；关闭管理员模式后，「开机启动」回到开启管理员模式之前的普通设置。
+- **远程桌面、虚拟局域网也友好** — 人不在家、靠远程桌面看着家里电脑时，或用 ZeroTier、Tailscale 这类工具（以及同类组网方式）把手机和电脑拉进同一虚拟局域网，只要两边能单播到对方，就可以正常配对使用。已连接并处于活跃状态的隧道和虚拟组网网卡会出现在配对窗中，二维码和可复制地址随选择切换；未启用网卡不会显示；常见且能明确识别为仅供本机使用的 Docker、虚拟机内部接口也会被过滤。
+- **保存地址池** — 可选打开每台电脑一次性记下多个候选 IP（Wi-Fi、有线、额外的网卡等）。换网之后手机按池子重试。不靠 UDP 广播去找人。
+
+---
+
+
+
+<a id="使用"></a>
+
+## 快速上手（只需三步）
+
+
+
+### 1. 下载程序
+
+前往 [Latest Release（最新版本）](https://github.com/MitsukiJoe/AgentsPads/releases/latest) 查看发布说明，或按系统下载最新正式版本：
 
 <div align="left">
 <table>
   <thead align="left">
     <tr>
-      <th>OS</th>
-      <th>Download</th>
-      <th>Requirements</th>
+      <th>系统</th>
+      <th>下载</th>
+      <th>要求</th>
     </tr>
   </thead>
   <tbody align="left">
     <tr>
       <td>Windows</td>
       <td><a href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads-windows-x64.exe"><img alt="Windows EXE x64" src="https://img.shields.io/badge/EXE-x64-2d7d9a.svg?logo=windows&logoColor=white"></a></td>
-      <td>Windows 10 / 11 (64-bit)</td>
+      <td>Windows 10 / 11（64 位）</td>
     </tr>
     <tr>
       <td>macOS</td>
       <td><a href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads-macos-arm64.dmg"><img alt="macOS DMG Apple Silicon" src="https://img.shields.io/badge/DMG-Apple%20Silicon-000000.svg?logo=apple&logoColor=white"></a></td>
-      <td>Apple Silicon (M1 or later)</td>
+      <td>Apple Silicon（M1 及更新芯片）</td>
     </tr>
     <tr>
       <td>Android</td>
       <td><a href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads.apk"><img alt="Android APK" src="https://img.shields.io/badge/APK-Android-168039.svg?logo=android&logoColor=white"></a></td>
-      <td>Android 5.0 or later</td>
+      <td>Android 5.0 及以上版本</td>
     </tr>
   </tbody>
 </table>
 </div>
 
+
 ---
 
-### 2. Connect
+
+
+### 2. 建立连接
 
 ```text
-Launch desktop app → Ensure phone & PC are on the same LAN (or hotspot/VLAN) → Pairing QR code pops up
-→ Confirm and select the subnet IP matching your phone in the adapter list beside the QR → Scan the QR, or paste "IP:port" manually and enter the 4-digit pairing code
+启动电脑端 → 确保手机与电脑在同一局域网（或开启手机热点/组网） → 电脑弹出配对二维码
+→ 在二维码右侧的网卡列表中确认选中与手机同网段的 IP → 手机扫码；或复制「IP:端口」手动添加，并输入 4 位配对码
 ```
 
-- **Windows Users**: Run `agentspads-windows-x64.exe`. Allow TCP **9618** through the firewall if prompted. On first launch, if "Windows protected your PC" appears, click the "More info" link in the dialog, then click "Run anyway" in the button that appears below to launch the app. If the PC uses Ethernet while the phone is on Wi-Fi, switch to the Wi-Fi adapter IP in the adapter list. To control administrator windows such as Task Manager, turn on "Launch as administrator" in Settings.
-- **macOS Users**: Open the `.dmg`, drag the app into Applications, and right-click → Open on first launch. Grant Accessibility permissions when prompted (essential for key and cursor injection).
-- **Android Users**: Install the APK. To pair for the first time or manage a computer, tap "Connected" in the upper-left corner to open the full device-management dialog, then tap the scan icon; or tap `+`, paste the copied desktop address, and enter the 4-digit pairing code shown in the pairing window.
+- **Windows 用户**：直接运行 `agentspads-windows-x64.exe`。若系统弹出防火墙提示，请放行 TCP **9618** 端口。首次运行若弹出「Windows 已保护你的电脑」，点击提示中的「更多信息」链接，随后在下方出现的按钮中点击「仍要运行」即可打开。当电脑插网线而手机连 Wi-Fi 时，记得在网卡列表中切换为 Wi-Fi 网卡 IP。如需操控任务管理器等管理员窗口，可在「设置」页打开「以管理员模式启动」。
+- **macOS 用户**：打开 `.dmg` 安装包，将 App 拖入「应用程序」文件夹；首次启动请右键点击选择「打开」。系统弹出「辅助功能」权限申请时务必允许（按键与指针注入的核心依赖）。
+- **Android 用户**：安装 APK。首次配对或管理电脑时，点击左上角「已连接」打开设备管理弹窗，再点击扫码图标；或点 `+` 粘贴刚复制的电脑地址，并填入配对窗显示的 4 位配对码。
 
-> "Connected" in the upper-left corner opens the full dialog for adding, editing, reordering, or deleting devices. The target strip only provides quick checkboxes for choosing which paired computers receive the current input; it sits below the input by default, and settings can move it to the top bar.
+> 左上角「已连接」用于打开完整的设备管理弹窗，执行添加、编辑、排序或删除；设备目标条只用于快速勾选哪些已配对电脑响应当前输入，默认在输入框下方，也可在设置中改到顶部。
 
-#### First Launch on macOS
+#### macOS 首次打开指南
 
-If macOS blocks AgentsPads the first time you open it, use either option below. First make sure the app came from this project's official GitHub Release and has been moved into Applications.
+**如果首次打开时被 macOS 拦截，请任选下面一种方式。**
+**请先确认 AgentsPads 来自本项目官方 GitHub Release，并已放入「应用程序」文件夹。**
 
-##### Terminal Command
+##### 终端执行命令
 
-Open Terminal, then copy and run:
+打开「终端」，复制并执行：
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/AgentsPads.app
 ```
 
-Open AgentsPads again when the command finishes.
+执行后重新打开 AgentsPads。
 
-##### Graphical Steps
+##### 图形界面操作
 
-1. Open **System Settings → Privacy & Security → Security**;
-2. Find the AgentsPads notice and click **"Open Anyway"**;
-3. Confirm with your password or Touch ID;
-4. Return to Applications and open AgentsPads again.
-
-> There is no need to disable Gatekeeper, and `spctl --master-disable` is not recommended.
-
----
-
-### 3. Start Using
-
-1. **Focus the Caret**: Click where you want text to land on your computer (AI Agent input, chat window, browser search bar, IDE, etc.) using your mouse or phone trackpad.
-2. **Input Freely**: Pick up your phone, type in the text box, or activate voice typing (e.g. Gboard). Text can auto-send when you pause, or you can tap the **Send** button manually.
-3. **Respond to Prompts**: When the Agent pauses for your choice, tap Esc / Enter / Shift+Enter (or your custom shortcuts) right below the input box.
-4. **Remote Control**: Switch apps or navigate the cursor using the trackpad, trackball, or pointing stick at the bottom.
-
-> **Tip**: When the Agent stops and waits for your choice, you can toggle off **Automatic Enter** first; keep it on when you want every spoken prompt submitted immediately.
-
----
-
-<a id="faq"></a>
-
-## FAQ
-
-**Q: Why won't my phone connect to my computer?**  
-**A:** First confirm that your phone and PC are on the same local network, phone hotspot, or virtual LAN (such as ZeroTier / Tailscale) where both sides can unicast, and that your computer's firewall allows TCP 9618.  
-In the adapter list beside the pairing QR code, switch to an active Wi-Fi, Ethernet, tunnel, or virtual-network address that your phone can reach, then scan again or paste that address. If an expected virtual-network address is missing, first confirm that the network is connected and has assigned an IPv4 address; inactive adapters and adapters without a candidate IPv4 address are omitted.
-macOS users: make sure AgentsPads is granted "Accessibility" permissions under System Settings.
-
-**Q: My phone stopped connecting after an upgrade, or after the computer reset its pairing key. What now?**  
-**A:** Connections require a pairing key. Device entries saved by older versions have no key, so the device-management dialog shows them as "Not paired"; after the computer resets its pairing key, the phone shows the device as "Rejected". Scan the QR code again, or enter the 4-digit code currently shown in the pairing window when editing the device.
-
-**Q: Why did injected text or mouse clicks land in the wrong application?**  
-**A:** Desktop injection strictly targets the currently active system focus. Make sure you click and activate the target input box or window before sending.
-
-**Q: Are there any text pasting limitations?**  
-**A:** AgentsPads delivers plain text.  
-Certain protected input boxes (such as secure password fields) or software that disables/remaps system paste shortcuts may reject input.  
-macOS retains the sent text on the system clipboard; Windows restores the previous text clipboard content shortly after pasting (non-text items like images are not restored).
-
-**Q: Does voice auto-send work with all third-party keyboards?**  
-**A:** AgentsPads never guesses input sources from text length, typing speed, or intermediate composition states. Instead, it requires strict source evidence: an Android recording session starting after the input box gains focus, or an IME explicitly declaring `voice` mode (such as Gboard voice typing).  
-AgentsPads only detects system recording status flags — it never captures or reads actual audio data, and requires no microphone permissions from the user.  
-Standard typing, composition, and clipboard pasting do not trigger auto-send on their own; an unrelated recording active at the same moment remains subject to the Android anonymity edge case below.
-After voice composition concludes, the system counts down the configured delay (default 0.5s, resetting if the IME continues AI formatting), ensuring AI-assisted voice keyboards have ample time to output final polished text.  
-Because Android anonymizes recording sources for standard apps, an unrelated app starting a recording at the exact moment of focus represents a very minor theoretical false-positive boundary. Full details are viewable anytime via the info icon next to "Voice Auto-send Delay" in Settings.
-
----
-
-## Technical Implementation and Constraints
-
-| Module | Current Implementation | Constraints & Safety Boundaries |
-| :--- | :--- | :--- |
-| **Architecture** | Android phone client built with Flutter; desktop daemon built in pure Rust for Windows and macOS | Strictly no Electron, Python runtime, or Flutter desktop shells, ensuring minimal resource footprint; the desktop pairing window repaints only when adapters, permissions, the pairing code, or update status change, or on user input, and presents no frames while idle |
-| **Android Native Bridge** | Lightweight native Kotlin module: binds to physical Wi-Fi only for same-subnet targets, manages OkHttp WebSocket connections, monitors anonymous recording state, inspects the IME subtype, and forwards an IME Backspace to the desktop when the input box is empty | UI rendering, reactive state, and gestures remain in Flutter; never records audio, requests no microphone permissions |
-| **Transport & Protocol** | Phone connects to desktop TCP `9618` via plain LAN WebSockets; messages use a fixed JSON schema. On every connection the desktop first sends a random challenge, and the phone must answer with an HMAC-SHA256 computed from the pairing key (or, for a first manual pairing, submit the 4-digit pairing code); connections that do not pass within 10 seconds are closed | No cloud relays, no user accounts, no external internet dependency; **authentication only blocks unauthorized devices from connecting; traffic is not encrypted. Anyone who can capture packets on the same network can read the text you send, and anyone who can intercept traffic can tamper with input. Use on untrusted networks (public Wi-Fi, shared offices, etc.) is not recommended; do not expose the port to the public internet** |
-| **Desktop Listener** | Daemon listens on `0.0.0.0:9618`, never binding exclusively to a single network interface | Ethernet, Wi-Fi, and hotspot addresses can connect when the endpoint is unicast-reachable and local firewall rules allow TCP 9618 |
-| **Pairing Mechanism** | Desktop displays a system DPI-scaled (~260pt) crisp QR code alongside a copyable `IP:port`; active physical, tunnel, and virtual-network adapter IPv4 addresses are switchable in the adapter list beside the QR. The QR carries the pairing key; manual address entry requires the 4-digit one-time pairing code shown in the pairing window (invalid once the window is hidden, replaced after each use, locked after 5 wrong attempts in total), after which the desktop hands out the pairing key | Inactive adapters and adapters without a candidate IPv4 address are filtered; common container/VM interfaces that can be clearly identified as machine-local are also excluded; phone also supports manual entry and persistent candidate IP pools. During manual pairing, both the code and the key handed out afterwards travel in plaintext, so they can still leak if someone is eavesdropping at that moment; "Reset pairing key" on the pairing window's Settings tab revokes every paired phone |
-| **Multi-Device Management** | Each computer maintains an independent WebSocket connection with its own reconnect logic; the phone uniformly sends to all checked, activated online targets; the target strip sits below the input by default and can be moved next to "Connected" in the top bar | Input box on phone clears immediately once any checked target succeeds; does not block on ACK from every machine. Connections and retries stop while the phone app is hidden and resume automatically when it becomes visible |
-| **Text Injection Pipeline** | Text finishes composition on the phone keyboard; desktop writes plain text to clipboard, then injects genuine `Ctrl+V` / `Cmd+V`. If Automatic Enter is active and paste succeeds, system waits 80ms for the target app to digest text before sending Enter | Desktop receives standard paste shortcuts rather than simulated keystrokes for `v`; secure fields or apps disabling paste may reject input. Normal text sync and manual Enter bypass this 80ms delay |
-| **Voice Detection Logic** | Focus must be accompanied by active Android recording or an IME subtype declaring `voice`; cursor must be at end of text, with no selection and finished composition | Relies on low-level source evidence rather than text heuristics, preventing typing or paste alone from triggering auto-send and supporting standard voice IMEs without whitelists. Configurable stability delay (0 / 0.5s / 1s / 1.5s, default 0.5s) allows AI restructuring time. Recording detection requires Android 7+; Android 5/6 relies on `voice` subtype. Concurrent unrelated recording is the remaining theoretical edge case |
-| **Shortcut Injection** | Phone sends key + modifiers; Windows calls `SendInput`, macOS calls `CGEvent` to inject genuine keydown / keyup events. When the input box is focused and empty, a soft-keyboard or hardware Backspace follows the same path and injects `Backspace` without using the shortcut row; when the input box is empty the Send button switches to a return-arrow icon and tapping it injects `Enter` through the same path | One unified global shortcut mapping; no per-application configuration profiles. Empty-box Backspace is forwarded only while the phone input still has focus and contains no text; leftover draft text is edited on the phone only. Empty-box Enter shares that same empty-box check with Backspace; as soon as the box holds text the Send button reverts to sending text |
-| **Undo Mechanism** | Phone instructs target computers to inject `Ctrl+Z` on Windows or `Cmd+Z` on macOS, restoring the last sent draft back into the phone input | Undo efficacy depends on target application undo history; terminals and CLI tools may ignore or reinterpret shortcut; executed commands and terminal output cannot be rolled back |
-| **Pointer & Cursor Control** | Phone transmits relative deltas, button bitmaps, and logical-pixel scroll deltas; a seven-tier slider offers 60/120/240/320/480/560/960Hz, defaulting to the highest tier at or below twice the display's **peak supported refresh rate** (120Hz → 240Hz; 230Hz → 320Hz; detection failure defaults to 60Hz), while preserving manual choices; Android window requests peak refresh to prevent frame throttling; separate Windows / macOS settings adjust pointer speed (×1–×7 on both, default Windows ×6 / macOS ×3) and wheel speed (Windows ×1–×7, default ×1; macOS ×4–×28 in steps of ×4, default ×16), with independent scroll direction settings (macOS reversed by default); injected via `SendInput` / `CGEvent`; macOS consecutive taps write the system click count (about 500ms and 5pt, up to triple-click; a drag breaks the sequence) | Strictly no fabricated path interpolation. When multiple deltas arrive within a single display refresh, cursor may appear to jump — this is delayed motion drawn at once, not misplacement; round trips maintain strict zero-drift precision. Trackpad / trackball / pointing stick share speed & wheel side configs; not physical HID hardware, not intended for esports or multi-display absolute mapping |
-| **Local State Persistence** | Android stores device lists, selection states, shortcuts, themes, voice delays, input heights, pointer modes/sizes/speeds/rates, wheel speed/side/direction, device-strip placement, landscape layout, force-landscape, and long-press haptic via `SharedPreferences` | Zero remote account synchronization; 100% of configuration and historical data remains strictly on the local device |
-| **System Permissions** | Android requires network access and camera permission for QR scanning; voice detection requires no microphone permission; macOS requires "Accessibility" under System Settings for key and cursor injection | macOS Accessibility TCC and code signing are separate mechanisms; Windows Firewall must allow LAN TCP 9618 traffic |
-| **Desktop Launch at Login** | The Settings tab of the desktop pairing window provides a default-off launch-at-login toggle; Windows creates or removes an entry in the Startup folder, while packaged macOS apps create or remove a LaunchAgent under `~/Library/LaunchAgents/` | The local login entry is written only after explicit user opt-in, requires no network access or elevation, and is removed when the toggle is disabled |
-| **Windows Administrator Mode** | "Launch as administrator" on the Settings tab is off by default; enabling it asks for UAC approval once and registers a scheduled task that runs with highest privileges, through which every later manual launch silently restarts as administrator, while launch at login is handled by a second task with a logon trigger that starts directly as administrator | Windows only; takes effect only after explicit opt-in and UAC approval, and exists to inject input into administrator windows such as Task Manager; the next launch after turning it off runs with normal privileges; the administrator instance keeps its pairing key separate from the normal instance, in a directory only Administrators/SYSTEM can access, so ordinary processes cannot read it and phones must re-scan after switching modes; if the scheduled task stops working (for example, the EXE was moved), AgentsPads runs with normal privileges and turns the toggle off so it can be re-registered; the administrator instance stores its theme, guide flag, and diagnostic logs in `%ProgramFiles%\AgentsPads\state` (permissions inherited from the program directory, readable by ordinary users); in administrator mode, launch at login is a second highest-privilege scheduled task with a logon trigger (about a 30-second delay), switched on and off by the administrator instance with `schtasks /Change` without writing to the user profile; turning administrator mode on removes the old Startup-folder entry, and turning it off returns to the normal setting from before; later launches start as administrator only when a marker in that program directory says so |
-
----
-
-## Log Locations
-
-Diagnostic logs are off by default and apply only to the current run. When you hit connection issues or unexpected behavior, turn on "Diagnostic logs" on the pairing window's Settings tab (enabling it clears old logs), reproduce the problem, then click "Open folder" or choose "Open Logs" from the tray menu; "Clear" deletes existing logs at any time. Logging turns itself off when AgentsPads restarts. Log locations:
-
-- **Windows**: `%APPDATA%\AgentsPads\logs\`; in administrator mode, `%ProgramFiles%\AgentsPads\state\logs\`
-- **macOS**: `~/Library/Logs/AgentsPads/`
-
----
-
-## Automatic Checks and Confirmed Updates
-
-AgentsPads uses a lightweight cross-platform update channel. Every stable Release includes a small manifest containing the version, download URLs, and SHA-256 values. Clients read the GitHub Release asset first and fall back to two CDN mirrors, avoiding dependence on GitHub REST API quotas. All three clients share the same check rhythm; downloads and installation always require user confirmation, and the app never updates itself unattended:
-
-- **Automatic check schedule**:
-  - The desktop and Android apps perform one background check after every launch;
-  - While an app remains running, it checks again every 24 hours from startup. Restarting starts a new process and therefore performs another launch check;
-  - Checks use an in-process HTTPS client and fall back through the CDN mirrors when the primary source is unavailable; they never open CMD, a terminal, or an unattended download;
-  - Background checks and automatic notifications do not open dialogs on their own: desktop shows a clickable update entry beside the version number in the window's top bar only when a newer release is found, and keeps the check status on the About tab. On Android, a newer release appears as a green dot and an "Update" badge beside the version number at the bottom of the home screen; the confirmation dialog opens only after you tap it. The manual "Check for Updates" command reports checking, up-to-date, or failure.
-- **Visible version status**:
-  - The desktop pairing window's top bar always shows the running version beside the listening port; the About tab shows the latest check result and offers a manual "Check for Updates";
-  - When a newer release is found, an "**Update to vX.Y.Z**" button appears beside the top-bar version and on the About tab. Download and replacement begin only after the user clicks it.
-- **Windows (In-Process Download and Self-Replacement)**:
-  - After the user clicks "Update to vX.Y.Z," AgentsPads downloads the new `agentspads-windows-x64.exe` through its in-process HTTPS client and reports progress in the UI; it does not invoke CMD, an updater script, or the system `curl`;
-  - Once the download completes, AgentsPads verifies its SHA-256 value before renaming the running EXE to `.old`, placing the new executable at the original path, and relaunching. A failed verification or replacement keeps the previous version and surfaces the reason in the UI;
-  - On startup, AgentsPads removes `.old` / `.new` update residue. A legacy `agentpad_updater.bat` left by older releases is removed only when its contents match the former AgentPad updater, avoiding accidental deletion of user files.
-- **macOS (Automatic App Bundle Swap)**:
-  - After the user clicks "Update to vX.Y.Z," AgentsPads downloads `agentspads-macos-arm64.zip`, verifies its SHA-256 value from the manifest, and only then extracts it;
-  - When running from any `.app` bundle in a writable location, AgentsPads renames the old bundle aside, places the new bundle at the original path, and launches it through `open -n`; this is not restricted to `/Applications`;
-  - If the bundle cannot be swapped by rename, AgentsPads falls back to an in-place `ditto` copy. Only non-bundle development builds open the extracted directory for manual handling; no DMG mount is required.
-- **Android (System Installer Confirmation)**:
-  - The bottom of the home screen permanently shows the current version number, following the same background check after launch and every 24 hours;
-  - When an automatic check finds a newer release, only a green dot and an "Update" badge light up beside the version number, with no dialog; tapping it opens the release notes, and only after tapping "Download & Update" does AgentsPads download `agentspads.apk` and open the system installer. The application id is `app.agentspads`. An in-place install of that same id, signed with the same key, retains saved devices and preferences. An existing install whose id is still `app.agentpad` is left in place; install the new package separately, and data from the old app does not come along.
+1. 进入「系统设置 → 隐私与安全性 → 安全性」；
+2. 在 AgentsPads 的拦截提示处点击「仍要打开」（Open Anyway）；
+3. 输入密码或使用 Touch ID 确认；
+4. 返回「应用程序」文件夹，再次打开 AgentsPads。
 
 ---
 
 
-<a id="build"></a>
 
-## Project Structure
+### 3. 开始使用
 
-```text
-AgentsPads/
-├── desktop/                 # Desktop daemon (Pure Rust core: Windows / macOS)
-│   └── crates/
-│       ├── agentpad/        # System tray, pairing UI window, WebSocket server
-│       └── agentpad-input/  # Plain text injection, system keystrokes & cursor engine
-├── android/                 # Mobile client (Android application)
-│   ├── lib/                 # Flutter UI, state management, gesture recognizers, protocol client
-│   └── android/app/src/main/kotlin/
-│       └── app/agentspads/  # Physical Wi-Fi binding, WebSocket client, voice evidence native bridge, empty-box Backspace
-├── LICENSE
-├── README.md
-└── README.zh-CN.md
-```
+1. **就位光标**：在鼠标或者手机上触控板点击一下你希望输入落地的位置（AI Agent 输入框、聊天窗的输入框、浏览器搜索栏等）。
+2. **随心输入**：拿起手机，直接在手机输入框打字，或开启手机语音输入法畅所欲言。说完后可等待其自动发送，也可手动轻按 **发送** 按钮。
+3. **响应确认**：当 Agent 停下等待你的确认时，直接在手机下方点击 Esc / Enter / Shift+Enter（或你自定义的快捷键）。
+4. **隔空操作**：想切换应用或移动光标？用下方的触控板、轨迹球或小红点滑动即可。
 
-## License
+> **小贴士**：当 Agent 停下来等你选择时，可以先关闭 **电脑自动回车**；希望每说完一句话就直接提交执行时，则保持打开。
 
-This project is licensed under the [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE).
+---
+
+
+
+<a id="常见问题"></a>
+
+## 常见问题（FAQ）
+
+**Q：手机为什么连不上电脑？**  
+**A：** 请首先确认手机与电脑处于同一局域网、手机热点，或者在 ZeroTier / Tailscale 等虚拟组网内能够互相单播通信，且电脑防火墙已放行 TCP 9618 端口。  
+在电脑配对窗二维码右侧的网卡列表中，请检查并切换到手机能真正访问到的活跃网卡 IP（Wi-Fi、有线、隧道或虚拟组网），然后再进行扫码或手动粘贴。若预期的虚拟组网地址没有出现，请先确认对应网络已连接并为电脑分配了 IPv4；未启用或没有候选 IPv4 的网卡不会进入列表。
+macOS 用户请务必检查系统设置中是否已为 AgentsPads 勾选授予「辅助功能」权限。
+
+**Q：升级后或电脑重置配对密钥后，手机连不上了？**  
+**A：** 连接需要配对密钥，旧版本保存的设备记录没有密钥，设备管理弹窗会显示「未配对」；电脑重置配对密钥后，手机会显示「被拒绝」。重新扫码，或在编辑设备里填入配对窗当前显示的 4 位配对码即可。
+
+**Q：发送的文字或鼠标点击跑到其他软件里了？**  
+**A：** 电脑端注入严格作用于当前的系统活动焦点。输入前请确保鼠标已点击激活了目标输入框或窗口。
+
+**Q：粘贴文本有什么限制吗？**  
+**A：** AgentsPads 只负责投递纯文本。  
+部分受安全策略保护的特殊输入框（如某些密码框），或禁用/重映射了系统粘贴快捷键的特定软件可能无法接收。  
+macOS 系统会将发送的文字保留在系统剪贴板中；Windows 系统会在粘贴操作完成后迅速恢复原有的文本剪贴板内容（非文本类如复制的图片内容不会恢复）。
+
+**Q：语音自动发送能完美适配所有第三方输入法吗？**  
+**A：** AgentsPads 坚决不通过文本长度、字数变化速度或组字中间态去盲猜来源，而是要求严谨的输入来源证据：输入框聚焦后系统捕获到 Android 录音活动，或当前输入法明确声明为 `voice` 模式。  
+AgentsPads 只检测系统录音活动标识，绝不抓取或读取任何实际音频，也无需向用户申请麦克风权限。  
+普通键盘手打、组字和粘贴本身不会单独触发自动发送；若同一时刻存在其它应用录音，仍受下述 Android 匿名化边界影响。
+语音输入组字完成后，会按照你所配置的延迟时间进行倒计时等待（默认 0.5 秒，期间若输入法继续进行 AI 排版整理会重新计时），确保搭载 AI 整理功能的语音输入法能够完整输出终稿。
+由于 Android 系统会对普通应用匿名化录音来源，若在输入框聚焦的同一瞬间有其他独立应用恰好开始录音，存在极低概率的理论误判边界。  
+详情可随时在设置页「语音自动发送延迟」旁的说明图标中查看。
+
+---
+
+<p align="center">
+  <a href="docs/technical.zh-CN.md"><img src="assets/readme/technical-zh.svg" width="184" height="44" alt="阅读技术文档" /></a>
+</p>
+
+## 开源许可证
+
+本项目基于 [GNU Affero General Public License v3.0 (AGPL-3.0)](LICENSE) 许可证开源，自由使用，保护开源。

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="184" height="44" viewBox="0 0 184 44" role="img" aria-labelledby="title">
+  <title id="title">阅读技术文档</title>
+  <rect width="184" height="44" rx="22" fill="#2563eb" />
+  <text x="80" y="28" text-anchor="middle" fill="#fff" font-family="Arial, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" font-size="16" font-weight="600">阅读技术文档</text>
+  <path d="M142 22h14m-5-5 5 5-5 5" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+</svg>
