@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:agentpad/hub.dart';
+import 'package:agentpad/pointer.dart';
 import 'package:agentpad/store.dart';
 
 void main() {
@@ -287,52 +288,63 @@ void main() {
     await s.load();
     expect(s.pointerMode, 'trackpad');
     expect(s.homePointerQuickSwitch, isTrue);
-    expect(s.deviceStripPlacement, 'input');
+    expect(s.deviceStripPlacement, 'top');
     expect(s.wheelSide, 'right');
     expect(s.wheelReverseWindows, isFalse);
-    expect(s.wheelReverseMac, isFalse);
+    expect(s.wheelReverseMac, isTrue);
     s.pointerMode = 'trackball';
     s.homePointerQuickSwitch = false;
-    s.deviceStripPlacement = 'top';
+    s.deviceStripPlacement = 'input';
     s.wheelSide = 'left';
     s.wheelReverseWindows = true;
-    s.wheelReverseMac = true;
+    s.wheelReverseMac = false;
     await s.save();
     final s2 = PadStore();
     await s2.load();
     expect(s2.pointerMode, 'trackball');
     expect(s2.homePointerQuickSwitch, isFalse);
-    expect(s2.deviceStripPlacement, 'top');
+    expect(s2.deviceStripPlacement, 'input');
     expect(s2.wheelSide, 'left');
     expect(s2.wheelReverseWindows, isTrue);
-    expect(s2.wheelReverseMac, isTrue);
+    expect(s2.wheelReverseMac, isFalse);
   });
 
-  test('pointer hz defaults to 60 and persists', () async {
-    SharedPreferences.setMockInitialValues({});
-    final s = PadStore();
-    await s.load();
-    expect(s.pointerHz, 60);
-    expect(s.pointerHzManual, isFalse);
-    s.pointerHz = 240;
-    s.pointerHzManual = true;
-    await s.save();
-    final s2 = PadStore();
-    await s2.load();
-    expect(s2.pointerHz, 240);
-    expect(s2.pointerHzManual, isTrue);
+  test(
+    'pointer hz falls back to 60 before detection and persists all seven tiers',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = PadStore();
+      await s.load();
+      expect(s.pointerHz, 60);
+      expect(s.pointerHzManual, isFalse);
+      for (final manual in [false, true]) {
+        for (final hz in pointerHzGears) {
+          s.pointerHz = hz;
+          s.pointerHzManual = manual;
+          await s.save();
+          final reloaded = PadStore();
+          await reloaded.load();
+          expect(reloaded.pointerHz, hz);
+          expect(reloaded.pointerHzManual, manual);
+        }
+      }
 
-    SharedPreferences.setMockInitialValues({'pointer_hz': 90});
-    final invalid = PadStore();
-    await invalid.load();
-    expect(invalid.pointerHz, 60);
-  });
+      SharedPreferences.setMockInitialValues({
+        'pointer_hz': 90,
+        'pointer_hz_manual': true,
+      });
+      final invalid = PadStore();
+      await invalid.load();
+      expect(invalid.pointerHz, 60);
+      expect(invalid.pointerHzManual, isFalse);
+    },
+  );
 
   test('pointer and platform wheel speed default and persist', () async {
     SharedPreferences.setMockInitialValues({});
     final s = PadStore();
     await s.load();
-    expect(s.pointerSpeedWindows, 3);
+    expect(s.pointerSpeedWindows, 6);
     expect(s.pointerSpeedMac, 3);
     expect(s.wheelSpeedWindows, 1);
     expect(s.wheelSpeedMac, 16);
@@ -358,7 +370,7 @@ void main() {
     });
     final invalid = PadStore();
     await invalid.load();
-    expect(invalid.pointerSpeedWindows, 3);
+    expect(invalid.pointerSpeedWindows, 6);
     expect(invalid.pointerSpeedMac, 6);
     expect(invalid.wheelSpeedWindows, 7);
     expect(invalid.wheelSpeedMac, 24);
@@ -375,7 +387,7 @@ void main() {
     expect(legacy.wheelSpeedMac, 16);
   });
 
-  test('non-manual 240 falls back before auto detect', () async {
+  test('non-manual 240 is retained until auto detection completes', () async {
     SharedPreferences.setMockInitialValues({
       'pointer_hz': 240,
       'pointer_hz_manual': false,
@@ -383,20 +395,40 @@ void main() {
     final s = PadStore();
     await s.load();
     expect(s.pointerHzManual, isFalse);
-    expect(s.pointerHz, 60);
+    expect(s.pointerHz, 240);
   });
 
-  test('pointer size persists', () async {
-    SharedPreferences.setMockInitialValues({});
-    final s = PadStore();
-    await s.load();
-    expect(s.pointerSize, 'medium');
-    s.pointerSize = 'large';
-    await s.save();
-    final s2 = PadStore();
-    await s2.load();
-    expect(s2.pointerSize, 'large');
-  });
+  test(
+    'pointer size defaults to the third tier and all five tiers persist',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final s = PadStore();
+      await s.load();
+      expect(s.pointerSize, 'large');
+      expect(s.trackpadHeight, 240);
+      for (final size in PadStore.pointerSizes) {
+        s.pointerSize = size;
+        await s.save();
+        final reloaded = PadStore();
+        await reloaded.load();
+        expect(reloaded.pointerSize, size);
+      }
+      SharedPreferences.setMockInitialValues({'pointer_size': 'invalid'});
+      await s.load();
+      expect(s.pointerSize, 'large');
+    },
+  );
+
+  test(
+    'removed largest trackpad size migrates to the largest remaining fixed size',
+    () async {
+      SharedPreferences.setMockInitialValues({'pointer_size': 'largest'});
+      final store = PadStore();
+      await store.load();
+      expect(store.pointerSize, 'extraLarge');
+      expect(store.trackpadHeight, 344);
+    },
+  );
 
   test('input height defaults to medium and persists', () async {
     SharedPreferences.setMockInitialValues({});
@@ -454,28 +486,25 @@ void main() {
     expect(s2.longPressHaptic, isFalse);
   });
 
-  test(
-    'voice auto-send delay defaults to half a second and persists',
-    () async {
-      SharedPreferences.setMockInitialValues({});
-      final s = PadStore();
-      await s.load();
-      expect(s.voiceDelayMs, 500);
-      expect(s.voiceDelay, const Duration(milliseconds: 500));
-      s.voiceDelayMs = 1000;
-      await s.save();
-      final s2 = PadStore();
-      await s2.load();
-      expect(s2.voiceDelayMs, 1000);
-      expect(s2.voiceDelay, const Duration(seconds: 1));
-    },
-  );
+  test('voice auto-send delay defaults to zero and persists', () async {
+    SharedPreferences.setMockInitialValues({});
+    final s = PadStore();
+    await s.load();
+    expect(s.voiceDelayMs, 0);
+    expect(s.voiceDelay, Duration.zero);
+    s.voiceDelayMs = 1000;
+    await s.save();
+    final s2 = PadStore();
+    await s2.load();
+    expect(s2.voiceDelayMs, 1000);
+    expect(s2.voiceDelay, const Duration(seconds: 1));
+  });
 
-  test('invalid voice auto-send delay falls back to half a second', () async {
+  test('invalid voice auto-send delay falls back to zero', () async {
     SharedPreferences.setMockInitialValues({'voice_delay_ms': 750});
     final s = PadStore();
     await s.load();
-    expect(s.voiceDelayMs, 500);
+    expect(s.voiceDelayMs, 0);
   });
 
   test('legacy trackpoint preference migrates to pointer mode', () async {

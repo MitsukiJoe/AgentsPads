@@ -372,6 +372,8 @@ void main() {
     () {
       final store = PadStore()
         ..limitActiveDevices = false
+        ..pointerSpeedWindows = 3
+        ..wheelReverseMac = false
         ..devices = [
           Device(
             deviceId: 'mac',

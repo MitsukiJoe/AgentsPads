@@ -3,18 +3,34 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:agentpad/pointer.dart';
 
 void main() {
-  test('pointerHzForDisplay picks 60, 120, and falls back', () {
-    expect(pointerHzForDisplay(null), 60);
-    expect(pointerHzForDisplay(0), 60);
-    expect(pointerHzForDisplay(60), 60);
-    expect(pointerHzForDisplay(60.000004), 60);
-    expect(pointerHzForDisplay(75), 60);
-    expect(pointerHzForDisplay(89), 60);
-    expect(pointerHzForDisplay(90), 120);
-    expect(pointerHzForDisplay(120), 120);
-    expect(pointerHzForDisplay(120.00001), 120);
-    expect(pointerHzForDisplay(144), 120);
-  });
+  test(
+    'pointerHzForDisplay doubles refresh rate and floors to a supported tier',
+    () {
+      expect(pointerHzForDisplay(null), 60);
+      expect(pointerHzForDisplay(0), 60);
+      expect(pointerHzForDisplay(-60), 60);
+      expect(pointerHzForDisplay(double.nan), 60);
+      expect(pointerHzForDisplay(double.infinity), 60);
+      expect(pointerHzForDisplay(24), 60);
+      expect(pointerHzForDisplay(60), 120);
+      expect(pointerHzForDisplay(60.000004), 120);
+      expect(pointerHzForDisplay(75), 120);
+      expect(pointerHzForDisplay(89), 120);
+      expect(pointerHzForDisplay(90), 120);
+      expect(pointerHzForDisplay(120), 240);
+      expect(pointerHzForDisplay(120.00001), 240);
+      expect(pointerHzForDisplay(144), 240);
+      expect(pointerHzForDisplay(230), 320);
+      expect(pointerHzForDisplay(1000), 960);
+      for (var i = 0; i < pointerHzGears.length; i++) {
+        final hz = pointerHzGears[i];
+        expect(pointerHzForDisplay(hz / 2), hz);
+        if (i > 0) {
+          expect(pointerHzForDisplay(hz / 2 - 0.001), pointerHzGears[i - 1]);
+        }
+      }
+    },
+  );
 
   test('coalesces motion only while the previous send is busy', () {
     final p = PointerCoalescer();
@@ -48,9 +64,14 @@ void main() {
 
   test('cadence period can be updated after construction', () {
     final c = PointerCadence();
-    c.period = const Duration(microseconds: 8333);
-    expect(c.due(Duration.zero), isFalse);
-    expect(c.due(const Duration(microseconds: 8333)), isTrue);
+    for (final hz in pointerHzGears) {
+      c.reset();
+      c.period = Duration(microseconds: (1000000 / hz).round());
+      expect(c.due(Duration.zero), isFalse);
+      expect(c.due(c.period - const Duration(microseconds: 1)), isFalse);
+      expect(c.due(c.period), isTrue);
+      expect(c.due(c.period), isFalse);
+    }
   });
 
   test('late hitch still emits one slot instead of catching up in a burst', () {

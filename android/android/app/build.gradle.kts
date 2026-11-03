@@ -54,6 +54,10 @@ android {
             applicationIdSuffix = ".debug"
             manifestPlaceholders["appLabel"] = "AgentsPads Debug"
         }
+        getByName("profile") {
+            applicationIdSuffix = ".profile"
+            manifestPlaceholders["appLabel"] = "AgentsPads Profile"
+        }
         release {
             signingConfig = if (keystorePropertiesFile.exists()) {
                 signingConfigs.getByName("release")
