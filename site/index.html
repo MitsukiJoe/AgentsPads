@@ -1,0 +1,988 @@
+<!doctype html>
+<html
+  lang="zh-CN"
+  data-theme="light"
+  data-title-zh="AgentsPads — 用手机，接着操作电脑"
+  data-title-en="AgentsPads — Your computer, within reach"
+  data-description-zh="把 Android 手机变成电脑的文字输入、快捷键和指针遥控器。支持 Windows 与 macOS，局域网直连，无需账号。"
+  data-description-en="Turn your Android phone into a text, shortcut and pointer remote for Windows and macOS. Connect over your local network, with no account."
+>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <meta
+      name="description"
+      content="把 Android 手机变成电脑的文字输入、快捷键和指针遥控器。支持 Windows 与 macOS，局域网直连，无需账号。"
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="AgentsPads — 用手机，接着操作电脑" />
+    <meta
+      property="og:description"
+      content="文字、快捷键、鼠标，用手机继续操作。局域网直连，无需账号。"
+    />
+    <link rel="icon" href="./assets/logo.png" />
+    <link rel="stylesheet" href="./styles.css?v=20261105-copy-9" />
+    <link rel="stylesheet" href="./pads.css?v=20261105-copy-9" />
+    <title>AgentsPads — 用手机，接着操作电脑</title>
+    <script>
+      (() => {
+        try {
+          const p = "agentspads";
+          const v = localStorage.getItem(p + "-theme");
+          document.documentElement.dataset.theme =
+            v === "light" || v === "dark"
+              ? v
+              : matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.lang =
+            localStorage.getItem(p + "-language") === "en" ? "en" : "zh-CN";
+        } catch {}
+      })();
+    </script>
+    <script src="./app.js?v=20261105-copy-9" defer></script>
+    <script src="./base.js?v=20261105-copy-9" defer></script>
+  </head>
+  <body data-product="agentspads">
+    <a class="skip" href="#main" data-zh="跳到正文" data-en="Skip to content"
+      >跳到正文</a
+    >
+    <header class="site-header">
+      <div class="header-inner">
+        <a class="brand" href="#top"
+          ><img
+            src="./assets/logo.png"
+            width="34"
+            height="34"
+            alt=""
+          />AgentsPads<small>YOUR POCKET REMOTE</small></a
+        >
+        <nav
+          class="site-nav"
+          id="site-nav"
+          aria-label="主导航"
+          data-zh-label="主导航"
+          data-en-label="Main navigation"
+        >
+          <a href="#try" data-zh="试用演示" data-en="Try the demo">试用演示</a
+          ><a href="#how" data-zh="怎么连接" data-en="How it works">怎么连接</a
+          ><a href="#download" data-zh="下载" data-en="Download">下载</a>
+        </nav>
+        <div class="header-actions">
+          <button
+            type="button"
+            id="language-toggle"
+            aria-label="Switch to English"
+          >
+            EN</button
+          ><button
+            type="button"
+            id="theme-toggle"
+            aria-label="切换主题"
+          ></button
+          ><a
+            class="github-link"
+            href="https://github.com/MitsukiJoe/AgentsPads"
+            target="_blank"
+            rel="noopener noreferrer"
+            >GitHub <span>↗</span></a
+          ><button
+            type="button"
+            id="site-menu"
+            aria-expanded="false"
+            aria-controls="site-nav"
+            aria-label="导航菜单"
+            data-zh-label="导航菜单"
+            data-en-label="Navigation menu"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M4 6h16M4 12h16M4 18h16" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">YOUR COMPUTER. A LITTLE CLOSER.</p>
+            <h1>Agents<span>Pads</span><span class="period">.</span></h1>
+            <p
+              class="hero-tagline"
+              data-zh="用手机，接着操作电脑。"
+              data-en="Your computer, within reach."
+            >
+              用手机，接着操作电脑。
+            </p>
+            <p
+              class="hero-description"
+              data-zh="文字、快捷键、鼠标，都在手机上。给 Agent 回一句、按个确认，或切到别的窗口，不必每次都回到键盘前。"
+              data-en="Text, shortcuts and a pointer, on your phone. Reply to your agent, confirm a step or switch windows without heading back to the keyboard."
+            >
+              文字、快捷键、鼠标，都在手机上。给 Agent
+              回一句、按个确认，或切到别的窗口，不必每次都回到键盘前。
+            </p>
+            <div class="hero-actions">
+              <a class="button primary" href="#download"
+                ><span data-zh="下载 AgentsPads" data-en="Get AgentsPads"
+                  >下载 AgentsPads</span
+                >↗</a
+              ><a class="button quiet" href="#try"
+                ><span data-zh="试试手感" data-en="Try the demo">试试手感</span
+                >↓</a
+              >
+            </div>
+            <p
+              class="hero-note"
+              data-zh="Android → Windows / macOS · 局域网直连 · 无需账号"
+              data-en="Android → Windows / macOS · Local network · No account"
+            >
+              Android → Windows / macOS · 局域网直连 · 无需账号
+            </p>
+          </div>
+          <div class="hero-scene" aria-hidden="true">
+            <div class="scene-label mono">
+              A LITTLE MORE ROOM TO GET COMFORTABLE.
+            </div>
+            <div class="scene-computer">
+              <div class="scene-monitor">
+                <div class="monitor-camera"></div>
+                <div class="monitor-content">
+                  <span class="monitor-app mono">AGENT / DESKTOP</span>
+                  <div class="monitor-line"></div>
+                  <div class="monitor-line medium"></div>
+                  <div class="monitor-line short"></div>
+                  <div
+                    class="monitor-message"
+                    data-zh="继续，按刚才的方案做。"
+                    data-en="Carry on with that plan."
+                  >
+                    继续，按刚才的方案做。
+                  </div>
+                  <div class="monitor-response">
+                    <span class="response-dot"></span
+                    ><span data-zh="正在处理…" data-en="Working on it…"
+                      >正在处理…</span
+                    >
+                  </div>
+                </div>
+              </div>
+              <div class="monitor-stand"></div>
+            </div>
+            <div class="scene-phone">
+              <div class="phone-island"></div>
+              <div class="phone-app-name">
+                <span>AgentsPads</span><span class="connected-dot"></span>
+              </div>
+              <div class="scene-actions">
+                <span data-zh="语音自动发送" data-en="Voice auto"
+                  >语音自动发送</span
+                ><span data-zh="电脑自动回车" data-en="Auto Enter"
+                  >电脑自动回车</span
+                ><span data-zh="撤回" data-en="Undo">撤回</span>
+              </div>
+              <div class="scene-composer">
+                <div
+                  class="scene-phone-text"
+                  data-zh="继续，按刚才的方案做。"
+                  data-en="Carry on with that plan."
+                >
+                  继续，按刚才的方案做。
+                </div>
+                <div class="scene-send-buttons">
+                  <span>⤢</span><span>➤</span>
+                </div>
+              </div>
+              <div class="scene-modes">
+                <span data-zh="触控板" data-en="Touchpad">触控板</span
+                ><span data-zh="轨迹球" data-en="Trackball">轨迹球</span
+                ><span data-zh="小红点" data-en="TrackPoint">小红点</span>
+              </div>
+              <div class="scene-trackpad"><span>·</span></div>
+              <div
+                class="scene-shortcut-label"
+                data-zh="⌨ 快捷键"
+                data-en="⌨ Shortcuts"
+              >
+                ⌨ 快捷键
+              </div>
+              <div class="scene-key-row">
+                <span>Esc</span><span>↵</span><span>⇧ ↵</span>
+              </div>
+              <div class="phone-home"></div>
+            </div>
+            <div class="scene-connection">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="scene-floor"></div>
+            <span class="scene-caption mono"
+              >COMPUTER ← LOCAL NETWORK ← PHONE</span
+            >
+          </div>
+        </div>
+        <div class="wrap hero-bottom">
+          <span>LESS DESK. SAME CONTROL.</span
+          ><a
+            href="#try"
+            data-zh="往下，用演示试试看 ↓"
+            data-en="Scroll to give it a try ↓"
+            >往下，用演示试试看 ↓</a
+          ><span>OPEN SOURCE / AGPL-3.0</span>
+        </div>
+      </section>
+      <section class="section demo-section" id="try">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <div>
+              <p class="eyebrow">01 / A REMOTE YOU CAN TRY</p>
+              <h2
+                data-zh="输入和指针，试一下就知道。"
+                data-en="Give it a little test drive."
+              >
+                输入和指针，试一下就知道。
+              </h2>
+            </div>
+            <p
+              class="intro"
+              data-zh="在手机面板写一句话，或在指针区拖动。<br>这是网页模拟，不会连接或控制你的电脑。"
+              data-en="Type on the phone panel, or drag in the pointer area.<br>This web demo does not connect to or control your computer."
+            >
+              在手机面板写一句话，或在指针区拖动。<br />这是网页模拟，不会连接或控制你的电脑。
+            </p>
+          </div>
+          <div class="remote-demo reveal">
+            <div class="demo-phone">
+              <div class="demo-device-bar">
+                <span class="connected-dot" aria-hidden="true"></span>
+                <span
+                  data-zh="Android 手机 / 演示"
+                  data-en="Android phone / demo"
+                  >Android 手机 / 演示</span
+                >
+                <span class="mono">01</span>
+              </div>
+              <div class="phone-screen-content">
+                <div
+                  class="phone-action-group"
+                  role="group"
+                  aria-label="输入操作"
+                  data-zh-label="输入操作"
+                  data-en-label="Input actions"
+                >
+                  <button
+                    type="button"
+                    id="voice-auto-toggle"
+                    aria-pressed="true"
+                    data-zh="语音自动发送"
+                    data-en="Voice auto-send"
+                  >
+                    语音自动发送
+                  </button>
+                  <button
+                    type="button"
+                    id="auto-enter-toggle"
+                    aria-pressed="false"
+                    data-zh="电脑自动回车"
+                    data-en="Auto Enter on PC"
+                  >
+                    电脑自动回车
+                  </button>
+                  <button
+                    type="button"
+                    id="undo-text"
+                    data-zh="撤回上次输入"
+                    data-en="Undo last input"
+                  >
+                    撤回上次输入
+                  </button>
+                </div>
+                <div class="phone-composer">
+                  <label
+                    class="sr-only"
+                    for="remote-input"
+                    data-zh="打字或用语音键盘"
+                    data-en="Type or use your voice keyboard"
+                    >打字或用语音键盘</label
+                  >
+                  <textarea
+                    id="remote-input"
+                    rows="3"
+                    maxlength="500"
+                    spellcheck="false"
+                    placeholder="打字或用语音键盘"
+                  ></textarea>
+                  <div class="phone-send-rail">
+                    <button
+                      type="button"
+                      id="input-height-toggle"
+                      aria-label="调整输入框高度"
+                      data-zh-label="调整输入框高度"
+                      data-en-label="Resize input"
+                    >
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M4 9V4h5m11 11v5h-5M4 4l6 6m10 10-6-6" />
+                      </svg>
+                    </button>
+                    <button type="button" id="send-text" aria-label="发送文字">
+                      <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="m3 3 19 9-19 9 4-9-4-9Zm4 9h15" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+                <div
+                  class="pointer-tabs"
+                  role="tablist"
+                  aria-label="指针模式"
+                  data-zh-label="指针模式"
+                  data-en-label="Pointer mode"
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    id="pointer-touchpad"
+                    aria-selected="true"
+                    aria-controls="pointer-area"
+                    data-pointer="touchpad"
+                    data-zh="触控板"
+                    data-en="Touchpad"
+                  >
+                    触控板</button
+                  ><button
+                    type="button"
+                    role="tab"
+                    id="pointer-trackball"
+                    aria-selected="false"
+                    tabindex="-1"
+                    aria-controls="pointer-area"
+                    data-pointer="trackball"
+                    data-zh="轨迹球"
+                    data-en="Trackball"
+                  >
+                    轨迹球</button
+                  ><button
+                    type="button"
+                    role="tab"
+                    id="pointer-trackpoint"
+                    aria-selected="false"
+                    tabindex="-1"
+                    aria-controls="pointer-area"
+                    data-pointer="trackpoint"
+                    data-zh="小红点"
+                    data-en="TrackPoint"
+                  >
+                    小红点
+                  </button>
+                </div>
+                <div
+                  class="pointer-area"
+                  id="pointer-area"
+                  role="tabpanel"
+                  aria-labelledby="pointer-touchpad"
+                  tabindex="0"
+                  data-mode="touchpad"
+                >
+                  <div class="touchpad-dots" aria-hidden="true"></div>
+                  <div class="pointer-ball" aria-hidden="true"></div>
+                  <div class="pointer-nub" aria-hidden="true"></div>
+                  <span class="pointer-hint" id="pointer-hint">在这里拖动</span>
+                </div>
+                <div class="phone-shortcuts">
+                  <p class="phone-shortcuts-label">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                      <rect x="2" y="5" width="20" height="14" rx="2" />
+                      <path
+                        d="M5 9h1m3 0h1m3 0h1m3 0h1M5 12h1m3 0h1m3 0h1m3 0h1M7 16h10"
+                      /></svg
+                    ><span data-zh="快捷键" data-en="Shortcuts">快捷键</span>
+                  </p>
+                  <div
+                    class="shortcut-row"
+                    role="group"
+                    aria-label="快捷键演示"
+                    data-zh-label="快捷键演示"
+                    data-en-label="Shortcut demo"
+                  >
+                    <button type="button" data-shortcut="Esc">Esc</button
+                    ><button
+                      type="button"
+                      data-shortcut="Enter"
+                      aria-label="Enter"
+                    >
+                      Enter ↵</button
+                    ><button
+                      type="button"
+                      data-shortcut="Shift+Enter"
+                      aria-label="Shift + Enter"
+                    >
+                      Shift + Enter
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="phone-demo-note">
+                <span id="draft-count" class="mono">0 / 500</span>
+                <span id="pointer-mode-number" class="mono">01 / 03</span>
+              </div>
+            </div>
+            <div class="demo-link" aria-hidden="true">
+              <span>←</span><span class="mono">LAN</span>
+            </div>
+            <div class="demo-computer">
+              <div class="computer-title">
+                <span class="desktop-glyph" aria-hidden="true">▤</span
+                ><span
+                  data-zh="电脑端 / 模拟接收区"
+                  data-en="Computer / simulated receiver"
+                  >电脑端 / 模拟接收区</span
+                ><span class="connected-dot"></span>
+              </div>
+              <div class="computer-desktop" id="computer-desktop">
+                <div class="demo-editor-window">
+                  <div class="editor-caption">
+                    <span class="mono">your-agent</span
+                    ><span aria-hidden="true">— □ ×</span>
+                  </div>
+                  <div
+                    class="received-text"
+                    id="received-text"
+                    data-zh="你发来的文字会显示在这里。"
+                    data-en="The text you send will appear here."
+                  >
+                    你发来的文字会显示在这里。
+                  </div>
+                  <div
+                    class="key-feedback"
+                    id="key-feedback"
+                    aria-hidden="true"
+                  >
+                    ↵
+                  </div>
+                </div>
+                <svg
+                  class="demo-cursor"
+                  id="demo-cursor"
+                  viewBox="0 0 24 30"
+                  aria-hidden="true"
+                >
+                  <path d="M2 2v23l6-6 5 10 4-2-5-9h9L2 2Z" /></svg
+                ><span class="desktop-label mono">SIMULATED DESKTOP</span>
+              </div>
+              <div
+                class="receiver-status"
+                id="receiver-status"
+                role="status"
+              ></div>
+              <p
+                class="demo-disclaimer"
+                data-zh="正式应用会把文字粘贴到电脑当前光标处；按键和指针由电脑端注入。此处只展示交互逻辑。"
+                data-en="The real app pastes text at your computer’s current cursor, and the desktop app injects keys and pointer input. This preview illustrates the interaction only."
+              >
+                正式应用会把文字粘贴到电脑当前光标处；按键和指针由电脑端注入。此处只展示交互逻辑。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section pads-features">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <div>
+              <p class="eyebrow">02 / MORE THAN A VOICE BUTTON</p>
+              <h2
+                data-zh="说话、打字，或者点一下。"
+                data-en="Speak. Type. Or just tap."
+              >
+                说话、打字，或者点一下。
+              </h2>
+            </div>
+            <p
+              class="intro"
+              data-zh="Agent 是一个很好的用法。<br>浏览器、编辑器、聊天窗口，也都能接着用。"
+              data-en="Agents are a great place to start.<br>Browsers, editors and chats work too."
+            >
+              Agent 是一个很好的用法。<br />浏览器、编辑器、聊天窗口，也都能接着用。
+            </p>
+          </div>
+          <div class="pads-feature-grid reveal">
+            <article>
+              <span class="feature-symbol" aria-hidden="true">Aa ↗</span>
+              <h3
+                data-zh="文字，在手机上准备好"
+                data-en="Get the words right on your phone"
+              >
+                文字，在手机上准备好
+              </h3>
+              <p
+                data-zh="使用喜欢的手机语音输入法，或直接打字。语音可等文本稳定后自动发送，也能先修改再手动发出。"
+                data-en="Use your favorite phone voice keyboard, or simply type. Voice text can send after it settles, or wait while you edit and send it yourself."
+              >
+                使用喜欢的手机语音输入法，或直接打字。语音可等文本稳定后自动发送，也能先修改再手动发出。
+              </p>
+            </article>
+            <article>
+              <span class="feature-symbol" aria-hidden="true">Esc ↵</span>
+              <h3
+                data-zh="该确认时，按键就在手边"
+                data-en="The right keys, right at hand"
+              >
+                该确认时，按键就在手边
+              </h3>
+              <p
+                data-zh="Esc、Enter、Shift+Enter，以及自定义快捷键。电脑收到真实的按下与抬起，按应用自己的方式响应。"
+                data-en="Esc, Enter, Shift+Enter and your custom shortcuts. The computer receives actual key-down and key-up events for the active app."
+              >
+                Esc、Enter、Shift+Enter，以及自定义快捷键。电脑收到真实的按下与抬起，按应用自己的方式响应。
+              </p>
+            </article>
+            <article>
+              <span class="feature-symbol" aria-hidden="true">↖ · ◉</span>
+              <h3
+                data-zh="鼠标，也可以换个握法"
+                data-en="A different way to hold the pointer"
+              >
+                鼠标，也可以换个握法
+              </h3>
+              <p
+                data-zh="触控板、轨迹球、小红点，按自己的习惯切换。移动、点击、拖拽、右键和滚轮都在手机上。"
+                data-en="Touchpad, trackball or TrackPoint. Move, click, drag, right-click and scroll from your phone, whichever way feels right."
+              >
+                触控板、轨迹球、小红点，按自己的习惯切换。移动、点击、拖拽、右键和滚轮都在手机上。
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+      <section
+        class="section defense-section"
+        id="your-rights"
+        aria-labelledby="defense-title"
+      >
+        <div class="wrap">
+          <div class="defense-masthead">
+            <span>03 / GET COMFORTABLE. STAY IN CONTROL.</span
+            ><span>TEXT. SHORTCUTS. POINTER.</span>
+          </div>
+          <div class="defense-grid reveal">
+            <div>
+              <h2
+                id="defense-title"
+                data-zh="坐着、靠着、躺着，&lt;br&gt;照样使唤电脑。"
+                data-en="Sit back. Stretch out.&lt;br&gt;Keep control."
+              >
+                坐着、靠着、躺着，<br />照样使唤电脑。
+              </h2>
+              <p
+                class="defense-lead"
+                data-zh="给 Agent 派活，去浏览器找点乐子。&lt;br&gt;一部手机，接着处理电脑上的大小事。"
+                data-en="Give your Agent a task, then find something fun in your browser.&lt;br&gt;One phone keeps everyday computer tasks within reach."
+              >
+                给 Agent 派活，去浏览器找点乐子。<br />一部手机，接着处理电脑上的大小事。
+              </p>
+              <p
+                class="defense-copy"
+                data-zh="要改字、点窗口，还是趁它跑代码看会儿视频？文字、快捷键和三种指针操作都在同一处，接着操控眼前的电脑。"
+                data-en="Dictate a task, edit a line, click a dialog—or put on a video while the code runs. Text, shortcuts and three pointer modes keep your computer within reach."
+              >
+                要改字、点窗口，还是趁它跑代码看会儿视频？文字、快捷键和三种指针操作都在同一处，接着操控眼前的电脑。
+              </p>
+            </div>
+            <div class="defense-evidence">
+              <article>
+                <span class="evidence-mark">A.</span>
+                <div>
+                  <h3
+                    data-zh="把你顺手的语音输入法，带给桌面 Agent。"
+                    data-en="Bring your favorite voice keyboard to your desktop Agent."
+                  >
+                    把你顺手的语音输入法，带给桌面 Agent。
+                  </h3>
+                  <p
+                    data-zh="中文怎么说顺，就怎么说。继续用手机上熟悉的识别、标点和文字整理功能，把整理好的需求交给电脑。"
+                    data-en="Speak Chinese the way that feels natural. Keep the speech recognition, punctuation and text cleanup you already use on your phone, then send the finished brief to your computer."
+                  >
+                    中文怎么说顺，就怎么说。继续用手机上熟悉的识别、标点和文字整理功能，把整理好的需求交给电脑。
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span class="evidence-mark">B.</span>
+                <div>
+                  <h3
+                    data-zh="差一个点击，也不用前倾。"
+                    data-en="One more click. Stay leaned back."
+                  >
+                    差一个点击，也不用前倾。
+                  </h3>
+                  <p
+                    data-zh="触控板、轨迹球、小红点随手切；选文字、拖动、右键、滚轮都能用。点回输入框，再按 Esc、Enter 或自定义快捷键，按那个软件自己的方式响应。"
+                    data-en="Choose a touchpad, trackball or TrackPoint to select text, drag, right-click and scroll. Click back into the input field and use Esc, Enter or a custom shortcut. The active app handles the key as usual."
+                  >
+                    触控板、轨迹球、小红点随手切；选文字、拖动、右键、滚轮都能用。点回输入框，再按
+                    Esc、Enter 或自定义快捷键，按那个软件自己的方式响应。
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span class="evidence-mark">C.</span>
+                <div>
+                  <h3
+                    data-zh="它跑代码，你看点别的。"
+                    data-en="While it codes, put something on."
+                  >
+                    它跑代码，你看点别的。
+                  </h3>
+                  <p
+                    data-zh="划动光标切到浏览器，用语音搜个视频；消息来了，再切到聊天框回一句。Agent、网页、聊天窗口，接着用同一套输入和指针操作。"
+                    data-en="Move the pointer to your browser and voice-search a video. A message comes in? Switch to the chat window and reply. The same text and pointer controls work across your Agent, browser and chat apps."
+                  >
+                    划动光标切到浏览器，用语音搜个视频；消息来了，再切到聊天框回一句。Agent、网页、聊天窗口，接着用同一套输入和指针操作。
+                  </p>
+                </div>
+              </article>
+              <article>
+                <span class="evidence-mark">D.</span>
+                <div>
+                  <h3
+                    data-zh="多一台电脑，不必多买一套键鼠。"
+                    data-en="Another computer. No extra keyboard and mouse."
+                  >
+                    多一台电脑，不必多买一套键鼠。
+                  </h3>
+                  <p
+                    data-zh="台式机、笔记本同时连着，用手机勾选这次要操作哪台。发文字、按快捷键、移动光标，手里这一部就能接着用。"
+                    data-en="Keep your desktop and laptop connected, then choose which to control from your phone. Send text, press shortcuts and move the pointer, all from the same phone in your hand."
+                  >
+                    台式机、笔记本同时连着，用手机勾选这次要操作哪台。发文字、按快捷键、移动光标，手里这一部就能接着用。
+                  </p>
+                </div>
+              </article>
+            </div>
+          </div>
+          <div class="defense-footer">
+            <span class="defense-tagline">Better use AgentsPads!</span
+            ><a class="defense-link" href="#download"
+              ><span
+                data-zh="把手机变成电脑遥控器"
+                data-en="Make your phone the remote"
+                >把手机变成电脑遥控器</span
+              ><span aria-hidden="true">↗</span></a
+            >
+          </div>
+        </div>
+      </section>
+      <section class="section how-section" id="how">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <div>
+              <p class="eyebrow">04 / KEEP IT LOCAL</p>
+              <h2
+                data-zh="电脑开着。手机连上。"
+                data-en="Computer on. Phone connected."
+              >
+                电脑开着。手机连上。
+              </h2>
+            </div>
+            <p
+              class="intro"
+              data-zh="无需注册，也不经过云中继。<br>手机和电脑能在同一局域网互相访问就行。"
+              data-en="No account and no cloud relay.<br>Your phone and computer just need to reach each other on a local network."
+            >
+              无需注册，也不经过云中继。<br />手机和电脑能在同一局域网互相访问就行。
+            </p>
+          </div>
+          <ol class="pairing-steps reveal">
+            <li>
+              <span class="step-no mono">01 / COMPUTER</span>
+              <h3
+                data-zh="在电脑上打开 AgentsPads"
+                data-en="Open AgentsPads on your computer"
+              >
+                在电脑上打开 AgentsPads
+              </h3>
+              <p
+                data-zh="配对窗口会显示二维码、地址和活跃网卡。选择手机能访问的那张网卡。"
+                data-en="The pairing window shows a QR code, address and active interfaces. Choose the interface your phone can reach."
+              >
+                配对窗口会显示二维码、地址和活跃网卡。选择手机能访问的那张网卡。
+              </p>
+            </li>
+            <li>
+              <span class="step-no mono">02 / PAIR</span>
+              <h3 data-zh="手机扫码，完成配对" data-en="Scan the code to pair">
+                手机扫码，完成配对
+              </h3>
+              <p
+                data-zh="也可以手动添加电脑地址，输入桌面窗口显示的 4 位一次性配对码。"
+                data-en="Or add the computer address manually and enter the four-digit, one-time code shown on the desktop."
+              >
+                也可以手动添加电脑地址，输入桌面窗口显示的 4 位一次性配对码。
+              </p>
+            </li>
+            <li>
+              <span class="step-no mono">03 / CARRY ON</span>
+              <h3
+                data-zh="把光标放好，继续操作"
+                data-en="Set the cursor, then carry on"
+              >
+                把光标放好，继续操作
+              </h3>
+              <p
+                data-zh="电脑保持解锁，激活想接收输入的窗口。之后就可以用手机投递文字、按键和移动指针。"
+                data-en="Keep the computer unlocked and activate the window that should receive input. Then use your phone for text, keys and pointer control."
+              >
+                电脑保持解锁，激活想接收输入的窗口。之后就可以用手机投递文字、按键和移动指针。
+              </p>
+            </li>
+          </ol>
+          <div class="local-notes reveal">
+            <div>
+              <span class="note-icon" aria-hidden="true">↔</span>
+              <h3
+                data-zh="一部手机，多台电脑"
+                data-en="One phone, multiple computers"
+              >
+                一部手机，多台电脑
+              </h3>
+              <p
+                data-zh="扫码继续添加设备，勾选这次要响应的电脑。设备名称、地址和顺序都能调整。"
+                data-en="Scan to add more computers, then choose which ones respond. Edit device names, addresses and order."
+              >
+                扫码继续添加设备，勾选这次要响应的电脑。设备名称、地址和顺序都能调整。
+              </p>
+            </div>
+            <div>
+              <span class="note-icon" aria-hidden="true">⌁</span>
+              <h3
+                data-zh="只响应已配对的设备"
+                data-en="Only paired devices get control"
+              >
+                只响应已配对的设备
+              </h3>
+              <p
+                data-zh="每次连接都做挑战应答校验。桌面端重置配对密钥，就能作废原来的手机配对。"
+                data-en="Each connection uses challenge-response verification. Resetting the pairing key on the desktop revokes existing pairings."
+              >
+                每次连接都做挑战应答校验。桌面端重置配对密钥，就能作废原来的手机配对。
+              </p>
+            </div>
+            <div>
+              <span class="note-icon" aria-hidden="true">↗</span>
+              <h3
+                data-zh="也适合你的虚拟局域网"
+                data-en="Works over your virtual LAN too"
+              >
+                也适合你的虚拟局域网
+              </h3>
+              <p
+                data-zh="通过 Tailscale、ZeroTier 等组网，两端能够互相单播访问时也可使用。AgentsPads 本身不提供屏幕传输。"
+                data-en="Tailscale, ZeroTier and similar networks work when both ends can reach each other. AgentsPads itself does not stream your screen."
+              >
+                通过 Tailscale、ZeroTier
+                等组网，两端能够互相单播访问时也可使用。AgentsPads
+                本身不提供屏幕传输。
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+      <section class="section download-section" id="download">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <div>
+              <p class="eyebrow">05 / GET COMFORTABLE</p>
+              <h2
+                data-zh="电脑和手机，各装一个。"
+                data-en="One for your computer. One for your phone."
+              >
+                电脑和手机，各装一个。
+              </h2>
+            </div>
+            <a
+              class="inline-link"
+              href="https://github.com/MitsukiJoe/AgentsPads/releases/latest"
+              target="_blank"
+              rel="noopener noreferrer"
+              ><span
+                data-zh="查看最新版本与发布说明"
+                data-en="Latest release and release notes"
+                >查看最新版本与发布说明</span
+              >↗</a
+            >
+          </div>
+          <div class="download-grid reveal">
+            <article>
+              <span class="download-platform" aria-hidden="true">⊞</span>
+              <h3>Windows</h3>
+              <p
+                data-zh="Windows 10 / 11，64 位"
+                data-en="Windows 10 / 11, 64-bit"
+              >
+                Windows 10 / 11，64 位
+              </p>
+              <a
+                class="button primary"
+                href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads-windows-x64.exe"
+                ><span data-zh="下载 EXE" data-en="Download EXE">下载 EXE</span
+                >↓</a
+              >
+            </article>
+            <article>
+              <span class="download-platform" aria-hidden="true">⌘</span>
+              <h3>macOS</h3>
+              <p
+                data-zh="Apple Silicon，M1 及更新芯片"
+                data-en="Apple Silicon, M1 and newer"
+              >
+                Apple Silicon，M1 及更新芯片
+              </p>
+              <a
+                class="button primary"
+                href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads-macos-arm64.dmg"
+                ><span data-zh="下载 DMG" data-en="Download DMG">下载 DMG</span
+                >↓</a
+              >
+            </article>
+            <article>
+              <span class="download-platform" aria-hidden="true">◔</span>
+              <h3>Android</h3>
+              <p data-zh="Android 5.0 及以上" data-en="Android 5.0 and newer">
+                Android 5.0 及以上
+              </p>
+              <a
+                class="button primary"
+                href="https://github.com/MitsukiJoe/AgentsPads/releases/latest/download/agentspads.apk"
+                ><span data-zh="下载 APK" data-en="Download APK">下载 APK</span
+                >↓</a
+              >
+            </article>
+          </div>
+          <p
+            class="source-note"
+            data-zh="电脑端需允许局域网 TCP 9618 连接；macOS 还需要辅助功能权限。完整安装、首次打开和连接说明见 README。"
+            data-en="Allow local-network connections on TCP 9618 on your computer. macOS also requires Accessibility permission. See the README for installation, first-launch and connection details."
+          >
+            电脑端需允许局域网 TCP 9618 连接；macOS
+            还需要辅助功能权限。完整安装、首次打开和连接说明见 README。
+          </p>
+        </div>
+      </section>
+      <section class="section faq-section">
+        <div class="wrap faq-layout">
+          <div>
+            <p class="eyebrow">A FEW PRACTICAL DETAILS</p>
+            <h2 data-zh="用之前，了解一下。" data-en="A few things to know.">
+              用之前，了解一下。
+            </h2>
+          </div>
+          <div class="faq-list">
+            <details>
+              <summary
+                data-zh="能在手机上看到电脑屏幕吗？"
+                data-en="Can I see my computer screen on my phone?"
+              >
+                能在手机上看到电脑屏幕吗？
+              </summary>
+              <p
+                data-zh="AgentsPads 是输入遥控器，不提供远程桌面或屏幕传输。你可以看着电脑操作，或配合已有的远程桌面工具使用。"
+                data-en="AgentsPads is an input remote. It does not provide remote desktop or screen streaming. Use it while viewing your computer, or alongside a remote desktop tool."
+              >
+                AgentsPads
+                是输入遥控器，不提供远程桌面或屏幕传输。你可以看着电脑操作，或配合已有的远程桌面工具使用。
+              </p>
+            </details>
+            <details>
+              <summary
+                data-zh="有 iPhone 版吗？"
+                data-en="Is there an iPhone app?"
+              >
+                有 iPhone 版吗？
+              </summary>
+              <p
+                data-zh="当前手机端为 Android。电脑端原生支持 Windows 和 Apple Silicon macOS。这里的网页演示不替代正式应用。"
+                data-en="The current phone app is Android only. The desktop app supports Windows and Apple Silicon macOS. This web demo is not a replacement for the native app."
+              >
+                当前手机端为 Android。电脑端原生支持 Windows 和 Apple Silicon
+                macOS。这里的网页演示不替代正式应用。
+              </p>
+            </details>
+            <details>
+              <summary
+                data-zh="语音是 AgentsPads 自己识别的吗？"
+                data-en="Does AgentsPads transcribe my voice?"
+              >
+                语音是 AgentsPads 自己识别的吗？
+              </summary>
+              <p
+                data-zh="文字来自你选择的手机输入法。AgentsPads 不抓取或读取实际音频，也不申请麦克风权限；它负责把完成组字的文字投递到电脑。语音自动发送的来源识别存在 Android 系统边界，详情见 README。"
+                data-en="Your phone keyboard handles voice input. AgentsPads does not capture or read audio, and does not request microphone permission. It delivers the completed text to your computer. See the README for Android’s voice-source detection limits."
+              >
+                文字来自你选择的手机输入法。AgentsPads
+                不抓取或读取实际音频，也不申请麦克风权限；它负责把完成组字的文字投递到电脑。语音自动发送的来源识别存在
+                Android 系统边界，详情见 README。
+              </p>
+            </details>
+            <details>
+              <summary
+                data-zh="连接不上时，先检查什么？"
+                data-en="What should I check if it will not connect?"
+              >
+                连接不上时，先检查什么？
+              </summary>
+              <p
+                data-zh="检查两端网络是否互通、桌面选择的网卡地址是否正确，以及 TCP 9618 是否放行。macOS 检查辅助功能权限。如果重置过配对密钥，需要重新配对。"
+                data-en="Check network reachability, the selected computer interface and TCP 9618 access. On macOS, check Accessibility permission. Pair again after resetting pairing keys."
+              >
+                检查两端网络是否互通、桌面选择的网卡地址是否正确，以及 TCP 9618
+                是否放行。macOS
+                检查辅助功能权限。如果重置过配对密钥，需要重新配对。
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+    <footer class="site-footer">
+      <div class="wrap">
+        <div class="footer-top">
+          <a class="footer-brand" href="#top">AgentsPads<span>.</span></a>
+          <p
+            data-zh="换个舒服的位置，接着做自己的事。"
+            data-en="Get comfortable. Carry on."
+          >
+            换个舒服的位置，接着做自己的事。
+          </p>
+        </div>
+        <div class="footer-bottom">
+          <span
+            >BY <a href="https://github.com/MitsukiJoe">MitsukiJoe</a> /
+            <a href="https://github.com/MitsukiJoe/AgentsPads/blob/main/LICENSE"
+              >AGPL-3.0</a
+            ></span
+          >
+          <div>
+            <a
+              href="https://github.com/MitsukiJoe/AgentsPads/blob/main/docs/technical.zh-CN.md"
+              data-zh="技术文档 ↗"
+              data-en="Technical docs ↗"
+              >技术文档 ↗</a
+            ><a
+              href="https://github.com/MitsukiJoe/AgentsPads/issues"
+              data-zh="反馈问题 ↗"
+              data-en="Report an issue ↗"
+              >反馈问题 ↗</a
+            ><a href="https://github.com/MitsukiJoe/AgentsPads">GitHub ↗</a>
+          </div>
+        </div>
+      </div>
+    </footer>
+    <div
+      id="announcement"
+      class="sr-only"
+      role="status"
+      aria-live="polite"
+    ></div>
+  </body>
+</html>
