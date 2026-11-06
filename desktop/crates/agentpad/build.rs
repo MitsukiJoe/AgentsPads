@@ -1,5 +1,22 @@
 fn main() {
     println!("cargo:rerun-if-env-changed=AGENTPAD_VERSION");
+    println!("cargo:rerun-if-env-changed=AGENTPAD_BUILD_ID");
+    println!("cargo:rerun-if-env-changed=AGENTPAD_CHANNEL");
+    let build_id = std::env::var("AGENTPAD_BUILD_ID").unwrap_or_else(|_| {
+        std::process::Command::new("git")
+            .args(["rev-parse", "--short=12", "HEAD"])
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| "local".into())
+    });
+    println!("cargo:rustc-env=AGENTPAD_BUILD_ID={build_id}");
+    println!(
+        "cargo:rustc-env=AGENTPAD_CHANNEL={}",
+        std::env::var("AGENTPAD_CHANNEL").unwrap_or_else(|_| "stable".into())
+    );
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         let icon = std::fs::read("agentpad-icon.png").expect("failed to read Windows icon");
         let version_text = std::env::var("AGENTPAD_VERSION")
@@ -12,9 +29,11 @@ fn main() {
             .add_string("ProductVersion", &version_text)
             .add_string("ProductName", "AgentsPads")
             .add_string("FileDescription", "AgentsPads")
+            .add_manifest(std::fs::read_to_string("app.manifest").expect("Windows manifest"))
             .add_icon(32512, embedinator::Icon::from_png_bytes(icon))
             .finish();
         println!("cargo:rerun-if-changed=agentpad-icon.png");
+        println!("cargo:rerun-if-changed=app.manifest");
     }
 }
 

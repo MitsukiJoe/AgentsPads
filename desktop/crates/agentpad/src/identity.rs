@@ -33,8 +33,7 @@ fn elevated_state_dir(elevated: bool) -> Option<PathBuf> {
     }
     #[cfg(windows)]
     {
-        // 标记已删除时，仍在运行的提权进程不要把受保护目录再建回来，也不要改走用户目录。
-        if !crate::elevation::enabled() {
+        if !crate::elevation::installed() {
             return None;
         }
         crate::elevation::protected_state_dir()
@@ -66,12 +65,20 @@ fn unwritable_elevated_dir() -> PathBuf {
 pub(crate) fn fixed_user_data_dir() -> PathBuf {
     #[cfg(windows)]
     {
-        std::env::var("APPDATA")
-            .ok()
-            .map(|dir| dir.trim().to_string())
-            .filter(|dir| !dir.is_empty())
-            .map(|dir| PathBuf::from(dir).join("AgentsPads"))
-            .unwrap_or_else(|| PathBuf::from(r"\\.\NUL\AgentsPads"))
+        use windows::Win32::UI::Shell::{
+            FOLDERID_RoamingAppData, SHGetKnownFolderPath, KF_FLAG_DEFAULT,
+        };
+        unsafe {
+            SHGetKnownFolderPath(&FOLDERID_RoamingAppData, KF_FLAG_DEFAULT, None)
+                .ok()
+                .and_then(|value| {
+                    let result = value.to_string().ok();
+                    windows::Win32::System::Com::CoTaskMemFree(Some(value.as_ptr().cast()));
+                    result
+                })
+                .map(|dir| PathBuf::from(dir).join("AgentsPads"))
+                .unwrap_or_else(|| PathBuf::from(r"\\.\NUL\AgentsPads"))
+        }
     }
     #[cfg(not(windows))]
     {
@@ -142,6 +149,7 @@ fn select_log_dir(
     }
 }
 
+#[cfg(not(windows))]
 fn home() -> PathBuf {
     PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
 }
@@ -231,10 +239,44 @@ fn load_admin() -> std::io::Result<Identity> {
 }
 
 fn write_json(path: &std::path::Path, id: &Identity) -> std::io::Result<()> {
+    use std::io::Write;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    std::fs::write(path, serde_json::to_vec_pretty(id).unwrap())
+    let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(&serde_json::to_vec_pretty(id)?)?;
+        file.sync_all()?;
+        drop(file);
+        #[cfg(windows)]
+        {
+            use windows::{
+                core::HSTRING,
+                Win32::Storage::FileSystem::{
+                    MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+                },
+            };
+            unsafe {
+                MoveFileExW(
+                    &HSTRING::from(temporary.as_os_str()),
+                    &HSTRING::from(path.as_os_str()),
+                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+                )
+            }
+            .map_err(std::io::Error::other)?;
+        }
+        #[cfg(not(windows))]
+        std::fs::rename(&temporary, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
 }
 
 /// 用户目录里的身份只接受 UUID 和干净的展示名，密钥一律丢掉。

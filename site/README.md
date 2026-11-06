@@ -12,7 +12,7 @@ python -m http.server 4175 --bind 127.0.0.1 --directory site
 
 `index.html` 提供中英文内容，`app.js` 管理文字、快捷键、撤回和指针演示，`base.js` 管理语言、主题和导航，`styles.css` 与 `pads.css` 提供布局及暖色视觉。`assets/logo.png` 直接复用桌面端项目图标。
 
-所有交互都在浏览器内模拟，不连接或控制电脑，不调用麦克风。正式下载链接对应项目 README 的 Windows EXE、Apple Silicon DMG 和 Android APK。
+所有交互都在浏览器内模拟，不连接或控制电脑，不调用麦克风。正式下载链接对应项目 README 的 Windows 安装包、Apple Silicon DMG 和 Android APK。
 
 正式介绍页：[AgentsPads](https://mitsukijoe.github.io/AgentsPads/)。
 

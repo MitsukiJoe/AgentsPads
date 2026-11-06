@@ -1,9 +1,12 @@
+#[cfg(any(not(windows), test))]
 use std::path::{Path, PathBuf};
 
+#[cfg(not(windows))]
 const PREFERENCE_FILE: &str = "autostart.txt";
 
 /// 同步用户 Startup 项。提权进程不碰用户目录，直接返回。
 /// 管理员模式下开机启动由计划任务的登录触发负责，Startup 里的旧项要撤掉，免得重复启动。
+#[cfg(not(windows))]
 pub fn apply() {
     if !available() || this_process_elevated() {
         return;
@@ -14,51 +17,42 @@ pub fn apply() {
     }
 }
 
+#[cfg(windows)]
+pub fn apply() {}
+
 pub fn enabled() -> bool {
     #[cfg(windows)]
-    if admin_mode() {
-        return crate::elevation::autostart_enabled();
+    {
+        crate::managed_tasks::login_startup_mode().is_some()
     }
-    read_preference(&preference_path())
+    #[cfg(not(windows))]
+    {
+        read_preference(&preference_path())
+    }
 }
 
 pub fn set_enabled(enabled: bool) -> std::io::Result<()> {
     #[cfg(windows)]
-    if admin_mode() {
-        // 只有提权实例能改计划任务；它不碰用户目录。
-        return if crate::elevation::set_autostart(enabled) {
-            Ok(())
-        } else {
-            Err(std::io::Error::other("admin autostart task update failed"))
-        };
+    {
+        crate::elevation::set_login_autostart(enabled).map_err(std::io::Error::other)
     }
-    if this_process_elevated() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            "autostart is unchanged while elevated",
-        ));
+    #[cfg(not(windows))]
+    {
+        if !available() {
+            return Err(std::io::Error::other("autostart requires the packaged app"));
+        }
+        sync_system(enabled)?;
+        let path = preference_path();
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        std::fs::write(path, enabled.to_string())
     }
-    if !available() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Unsupported,
-            "autostart requires the packaged app",
-        ));
-    }
-    sync_system(enabled)?;
-    let path = preference_path();
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, enabled.to_string())
 }
 
+#[cfg(not(windows))]
 fn this_process_elevated() -> bool {
     crate::elevation::is_elevated()
-}
-
-#[cfg(windows)]
-fn admin_mode() -> bool {
-    crate::elevation::enabled()
 }
 
 #[cfg(not(windows))]
@@ -67,6 +61,7 @@ fn admin_mode() -> bool {
 }
 
 /// 偏好留在普通用户目录。提权进程只读这个布尔值，写入被 `edits_allowed` 拒绝。
+#[cfg(not(windows))]
 fn preference_path() -> PathBuf {
     let dir = if this_process_elevated() {
         crate::identity::fixed_user_data_dir()
@@ -77,9 +72,17 @@ fn preference_path() -> PathBuf {
 }
 
 pub fn available() -> bool {
-    running_from_app_bundle()
+    #[cfg(windows)]
+    {
+        crate::elevation::installed()
+    }
+    #[cfg(not(windows))]
+    {
+        running_from_app_bundle()
+    }
 }
 
+#[cfg(any(not(windows), test))]
 fn read_preference(path: &Path) -> bool {
     let Ok(meta) = std::fs::symlink_metadata(path) else {
         return false;
@@ -90,6 +93,7 @@ fn read_preference(path: &Path) -> bool {
     std::fs::read_to_string(path).is_ok_and(|value| value.trim() == "true")
 }
 
+#[cfg(any(not(windows), test))]
 fn sync_entry(path: &Path, contents: &str, enabled: bool) -> std::io::Result<()> {
     if enabled {
         if let Some(parent) = path.parent() {
@@ -105,6 +109,7 @@ fn sync_entry(path: &Path, contents: &str, enabled: bool) -> std::io::Result<()>
     }
 }
 
+#[cfg(not(windows))]
 fn sync_system(enabled: bool) -> std::io::Result<()> {
     let exe = std::env::current_exe()?;
     #[cfg(target_os = "macos")]
@@ -130,6 +135,7 @@ fn sync_system(enabled: bool) -> std::io::Result<()> {
     }
 }
 
+#[cfg(any(not(windows), test))]
 pub(crate) fn app_bundle_for_exe(exe: &Path) -> Option<PathBuf> {
     exe.ancestors()
         .find(|path| path.extension().is_some_and(|ext| ext == "app"))
@@ -150,12 +156,7 @@ pub(crate) fn running_from_app_bundle() -> bool {
     }
 }
 
-/// 启动项只指向当前这个未提权进程自己的 exe，不再读用户目录里的启动器路径。
-#[cfg(any(windows, test))]
-fn windows_startup_bat(exe: &Path) -> String {
-    format!("@echo off\r\nstart \"\" \"{}\"\r\n", exe.display())
-}
-
+#[cfg(any(not(windows), test))]
 fn macos_plist(app: &Path) -> String {
     format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -229,14 +230,5 @@ mod tests {
         assert!(body.contains("<string>/usr/bin/open</string>"));
         assert!(body.contains("<string>-g</string>"));
         assert!(body.contains("<string>/Applications/AgentsPads.app</string>"));
-    }
-
-    #[test]
-    fn windows_startup_bat_points_at_the_current_executable_only() {
-        let bat = windows_startup_bat(Path::new(r"C:\Apps\AgentsPads\agentspads.exe"));
-        assert_eq!(
-            bat,
-            "@echo off\r\nstart \"\" \"C:\\Apps\\AgentsPads\\agentspads.exe\"\r\n"
-        );
     }
 }

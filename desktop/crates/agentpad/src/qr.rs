@@ -53,7 +53,7 @@ mod tests {
     fn renders_black_on_opaque_white() {
         let img = color_image("{\"v\":1}", 64).unwrap();
         assert_eq!(img.size, [64, 64]);
-        assert!(img.pixels.iter().any(|p| *p == Color32::BLACK));
+        assert!(img.pixels.contains(&Color32::BLACK));
         assert!(img
             .pixels
             .iter()

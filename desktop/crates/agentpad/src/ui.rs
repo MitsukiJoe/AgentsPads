@@ -66,7 +66,7 @@ const EMPTY_ANIM: f32 = 0.25;
 /// Long help reads better wrapped; kept under the window so the tail is not clipped.
 const TOOLTIP_W: f32 = 360.0;
 #[cfg(windows)]
-const ADMIN_HELP: &str = "让 AgentsPads 能控制任务管理器等需要管理员权限的窗口。开启时需要确认一次，程序会被复制到只有管理员才能修改的系统文件夹，之后都从那里运行，其他软件没法偷偷替换它。不用时建议关闭。";
+const ADMIN_HELP: &str = "普通和管理员入口使用同一份已安装程序。管理员权限用于控制以管理员身份运行的窗口；首次启用需系统授权。切换权限不会复制程序，也不会改变版本。两种权限各自保留配对密钥，切换后请使用对应配对码。";
 const FOOTER: &str = if cfg!(windows) {
     "关闭窗口后仍在系统托盘运行 · 从托盘菜单退出"
 } else {
@@ -112,6 +112,11 @@ fn spawn_watcher(
         let mut last_update_check = Instant::now();
         loop {
             std::thread::sleep(WATCH_INTERVAL);
+            #[cfg(windows)]
+            if crate::elevation::close_requested() {
+                crate::handle::stop_input();
+                exit_with_probe(0, "managed_handoff_watch");
+            }
             if last_update_check.elapsed() >= UPDATE_CHECK_INTERVAL {
                 updater.check_for_updates();
                 last_update_check = Instant::now();
@@ -341,7 +346,13 @@ impl PairingApp {
             tray_rx
         };
         let updater = Arc::new(crate::updater::Updater::new());
-        updater.check_for_updates();
+        let should_check = matches!(
+            *updater.status.lock().unwrap(),
+            crate::updater::UpdateStatus::Idle
+        );
+        if should_check {
+            updater.check_for_updates();
+        }
         let first = Watched::sample(&state, &updater);
         let nics = first.nics.clone();
         let selected_ip = net::default_ip(&nics).unwrap_or_default();
@@ -390,7 +401,7 @@ impl PairingApp {
             sharing_enabled: false,
             window_h: 0.0,
             #[cfg(windows)]
-            run_as_admin: crate::elevation::enabled(),
+            run_as_admin: crate::elevation::is_elevated(),
             #[cfg(windows)]
             admin_confirm: None,
             autostart_enabled: crate::autostart::enabled(),
@@ -458,10 +469,7 @@ impl PairingApp {
         };
         if let RawWindowHandle::Win32(win) = handle.as_raw() {
             self.hwnd.store(win.hwnd.get(), Ordering::Release);
-            if !self.ready_published
-                && crate::elevation::relaunched()
-                && crate::elevation::is_elevated()
-            {
+            if !self.ready_published {
                 if crate::elevation::publish_ready(win.hwnd.get()).is_err() {
                     crate::elevation::note_startup_failure("ready verification failed", "");
                     crate::handle::stop_input();
@@ -568,6 +576,11 @@ impl PairingApp {
     }
 
     fn tick(&mut self, ctx: &egui::Context) {
+        #[cfg(windows)]
+        if crate::elevation::close_requested() {
+            crate::handle::stop_input();
+            exit_with_probe(0, "managed_handoff");
+        }
         self.poll_tray(ctx);
         self.apply_window_cmds(ctx);
         self.state
@@ -1191,7 +1204,11 @@ impl PairingApp {
                     if switch_block(
                         ui,
                         "开机启动",
-                        "登录系统后在托盘后台运行",
+                        if cfg!(windows) {
+                            "登录时启动同一程序，保留开启时的权限"
+                        } else {
+                            "登录系统后在托盘后台运行"
+                        },
                         None,
                         "autostart",
                         &mut on,
@@ -1199,7 +1216,13 @@ impl PairingApp {
                     ) {
                         match crate::autostart::set_enabled(on) {
                             Ok(()) => self.autostart_enabled = on,
-                            Err(_) => crate::logutil::write("autostart setting failed"),
+                            Err(reason) => {
+                                crate::logutil::write("autostart setting failed");
+                                #[cfg(windows)]
+                                crate::elevation::note_handoff_failure(format!(
+                                    "开机启动设置未改变：{reason}"
+                                ));
+                            }
                         }
                     }
                 }
@@ -1211,7 +1234,7 @@ impl PairingApp {
                     let mut on = self.run_as_admin;
                     if switch_block(
                         ui,
-                        "以管理员模式启动",
+                        "当前使用管理员权限",
                         if crate::elevation::is_elevated() {
                             "当前已提权，可控制管理员窗口"
                         } else {
@@ -1689,12 +1712,12 @@ impl PairingApp {
         let (title, body) = if on {
             (
                 "切换到管理员模式",
-                "如果切换的话，手机上需要重新配对。\n确认后将请求一次系统授权，并自动重启程序。",
+                "两种权限使用同一份已安装程序。\n首次使用需系统授权，以后可静默启动。\n切换后，手机需要使用对应权限的配对码。",
             )
         } else {
             (
-                "关闭管理员模式",
-                "如果切换的话，手机上需要重新配对。\n确认后将停止管理员实例、清理管理员任务，并以普通权限重新打开程序。",
+                "切换到普通权限",
+                "将用普通权限重新打开同一份程序。\n管理员快捷方式和已有授权仍然保留。\n手机需要使用普通权限的配对码。",
             )
         };
         let screen = ctx.content_rect();
@@ -1774,62 +1797,10 @@ impl PairingApp {
 
     #[cfg(windows)]
     fn set_run_as_admin(&mut self, on: bool) {
-        use crate::elevation;
-        // 开机启动的当前选择随任务带过去；管理员模式下它由计划任务的登录触发负责。
-        if on {
-            if let Err(reason) = elevation::install_task(crate::autostart::enabled()) {
-                elevation::note_handoff_failure(reason);
-                crate::logutil::write("admin task install failed");
-                return;
-            }
+        if let Err(reason) = crate::elevation::begin_switch(on) {
+            crate::elevation::note_handoff_failure(reason);
         }
-        if !on {
-            if let Err(reason) = elevation::begin_disable_admin() {
-                elevation::note_handoff_failure(&reason);
-                crate::logutil::write("admin disable handoff failed");
-                self.run_as_admin = elevation::enabled();
-                return;
-            }
-            crate::handle::stop_input();
-            #[cfg(all(windows, feature = "perf-probe"))]
-            if let Some(probe) = crate::perf_probe::active() {
-                probe.record(
-                    "stop_input_done",
-                    Some("admin_mode_switch"),
-                    None,
-                    None,
-                    None,
-                    None,
-                );
-            }
-            exit_with_probe(0, "admin_mode_switch");
-        }
-        // 取消 UAC 时受保护标记仍在，开关保持打开。
-        self.run_as_admin = true;
-        // 撤掉用户 Startup 里的旧项（管理员模式下由登录触发接管）；提权进程里这是空操作。
-        crate::autostart::apply();
-        self.autostart_enabled = crate::autostart::enabled();
-        if on && self.run_as_admin && !elevation::is_elevated() {
-            // 新的普通进程等本进程退出、端口释放后再走 main 里的交接。
-            // schtasks /Run 成功只代表任务已排队，不能在这里直接退出。
-            if elevation::spawn_unelevated_handoff() {
-                crate::handle::stop_input();
-                #[cfg(all(windows, feature = "perf-probe"))]
-                if let Some(probe) = crate::perf_probe::active() {
-                    probe.record(
-                        "stop_input_done",
-                        Some("admin_mode_handoff"),
-                        None,
-                        None,
-                        None,
-                        None,
-                    );
-                }
-                exit_with_probe(0, "admin_mode_handoff");
-            }
-            elevation::note_handoff_failure("无法重新打开窗口");
-            crate::logutil::write("admin handoff spawn failed");
-        }
+        self.run_as_admin = crate::elevation::is_elevated();
     }
 }
 

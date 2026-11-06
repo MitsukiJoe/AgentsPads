@@ -47,6 +47,8 @@ jobs:
     runs-on: windows-latest
     env:
       AGENTPAD_VERSION: ${{ needs.prepare-version.outputs.version }}
+      AGENTPAD_BUILD_ID: ${{ github.sha }}
+      AGENTPAD_CHANNEL: stable
     steps:
       - name: Checkout repository
         uses: actions/checkout@v7
@@ -63,6 +65,7 @@ jobs:
         shell: pwsh
         run: |
           cargo build --manifest-path desktop/Cargo.toml -p agentpad --release --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item desktop\target\x86_64-pc-windows-msvc\release\agentpad.exe agentspads-windows-x64.exe
 
       - name: Sign Windows executable
@@ -70,37 +73,46 @@ jobs:
         env:
           WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
           WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./desktop/installer/sign-windows-artifact.ps1 -Path agentspads-windows-x64.exe
+
+      - name: Prepare installer compiler
+        id: installer-compiler
+        shell: pwsh
         run: |
-          if ([string]::IsNullOrEmpty($env:WINDOWS_CERTIFICATE_PFX_BASE64) -or [string]::IsNullOrEmpty($env:WINDOWS_CERTIFICATE_PASSWORD)) {
-            Write-Host "Windows signing secrets not configured; publishing unsigned executable"
-            exit 0
+          $compilerSetup = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+          $compilerDirectory = Join-Path $env:RUNNER_TEMP 'agentspads-inno-6.7.4'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $compilerSetup
+          if ((Get-FileHash -LiteralPath $compilerSetup -Algorithm SHA256).Hash -ne 'A549929319F9120716677C685535CA4671E4B937B5FDC87E2585F32D8EB30E8C') {
+            throw 'Inno Setup compiler checksum verification failed.'
           }
-          $certificatePath = Join-Path $env:RUNNER_TEMP "agentpad-signing.pfx"
-          try {
-            $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64)
-            [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
-            $programFilesX86 = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFilesX86)
-            $kitsRoot = Join-Path $programFilesX86 "Windows Kits\10\bin"
-            $signtool = Get-ChildItem "$kitsRoot\*\x64\signtool.exe" |
-              Sort-Object FullName -Descending |
-              Select-Object -First 1
-            if (-not $signtool) {
-              throw "signtool.exe was not found"
-            }
-            $signtoolPath = $signtool.FullName
-            & $signtoolPath sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certificatePath /p $env:WINDOWS_CERTIFICATE_PASSWORD agentspads-windows-x64.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-            & $signtoolPath verify /pa /v agentspads-windows-x64.exe
-            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          } finally {
-            Remove-Item -LiteralPath $certificatePath -Force -ErrorAction SilentlyContinue
+          $signature = Get-AuthenticodeSignature -LiteralPath $compilerSetup
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch 'Pyrsys B.V.') {
+            throw 'Inno Setup compiler signature verification failed.'
           }
+          $compilerProcess = Start-Process -FilePath $compilerSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/CURRENTUSER', '/PORTABLE=1', '/NOICONS', ('/DIR="' + $compilerDirectory + '"')) -WindowStyle Hidden -Wait -PassThru
+          if ($compilerProcess.ExitCode -ne 0) { throw 'Inno Setup compiler preparation failed.' }
+          "path=$(Join-Path $compilerDirectory 'ISCC.exe')" >> $env:GITHUB_OUTPUT
+
+      - name: Build Windows installer
+        shell: pwsh
+        env:
+          INSTALLER_COMPILER: ${{ steps.installer-compiler.outputs.path }}
+        run: ./desktop/installer/build-windows-installer.ps1 -Version $env:AGENTPAD_VERSION -Executable agentspads-windows-x64.exe -OutputDirectory . -Compiler $env:INSTALLER_COMPILER
+
+      - name: Sign Windows installer
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: ./desktop/installer/sign-windows-artifact.ps1 -Path agentspads-windows-x64-setup.exe
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v7
         with:
           name: windows-artifact
-          path: agentspads-windows-x64.exe
+          path: |
+            agentspads-windows-x64-setup.exe
+            agentspads-windows-x64.exe
           if-no-files-found: error
 
   build-macos:
@@ -341,10 +353,11 @@ jobs:
         shell: bash
         run: |
           test -s agentspads-windows-x64.exe
+          test -s agentspads-windows-x64-setup.exe
           test -s agentspads-macos-arm64.dmg
           test -s agentspads-macos-arm64.zip
           test -s agentspads.apk
-          sha256sum agentspads-windows-x64.exe agentspads-macos-arm64.dmg agentspads-macos-arm64.zip agentspads.apk
+          sha256sum agentspads-windows-x64-setup.exe agentspads-windows-x64.exe agentspads-macos-arm64.dmg agentspads-macos-arm64.zip agentspads.apk
 
       - name: Create update manifest
         shell: bash
@@ -361,7 +374,7 @@ jobs:
           windows_sha="$(sha256sum agentspads-windows-x64.exe | awk '{print $1}')"
           macos_sha="$(sha256sum agentspads-macos-arm64.zip | awk '{print $1}')"
           android_sha="$(sha256sum agentspads.apk | awk '{print $1}')"
-          BASE_URL="$base_url" python3 -c 'import os; from pathlib import Path; base=os.environ["BASE_URL"]; badge=lambda alt, url, src: f"<a href=\"{url}\"><img alt=\"{alt}\" src=\"{src}\"></a>"; rows=("Windows", badge("Windows EXE x64", f"{base}/agentspads-windows-x64.exe", "https://img.shields.io/badge/EXE-x64-2d7d9a.svg?logo=windows&logoColor=white"), "macOS", badge("macOS DMG Apple Silicon", f"{base}/agentspads-macos-arm64.dmg", "https://img.shields.io/badge/DMG-Apple%20Silicon-000000.svg?logo=apple&logoColor=white"), "Android", badge("Android APK", f"{base}/agentspads.apk", "https://img.shields.io/badge/APK-Android-168039.svg?logo=android&logoColor=white")); body=["<a href=\"https://qm.qq.com/q/oL9E21pt7k\"><img alt=\"QQ群\" src=\"https://img.shields.io/badge/QQ%E7%BE%A4-%E7%82%B9%E6%AD%A4%E5%8A%A0%E5%85%A5-2da44e.svg?logo=qq&logoColor=white\"></a> <a href=\"https://t.me/Neko0CM\"><img alt=\"TG群\" src=\"https://img.shields.io/badge/TG%E7%BE%A4-%E7%82%B9%E6%AD%A4%E5%8A%A0%E5%85%A5-26A5E4.svg?logo=telegram&logoColor=white\"></a>", "", "**按系统下载：**", "", "<div align=\"left\">", "<table>", "<thead align=\"left\"><tr><th>系统</th><th>下载</th></tr></thead>", "<tbody align=\"left\">"];
+          BASE_URL="$base_url" python3 -c 'import os; from pathlib import Path; base=os.environ["BASE_URL"]; badge=lambda alt, url, src: f"<a href=\"{url}\"><img alt=\"{alt}\" src=\"{src}\"></a>"; rows=("Windows", badge("Windows 安装包 x64", f"{base}/agentspads-windows-x64-setup.exe", "https://img.shields.io/badge/Setup-x64-2d7d9a.svg?logo=windows&logoColor=white"), "macOS", badge("macOS DMG Apple Silicon", f"{base}/agentspads-macos-arm64.dmg", "https://img.shields.io/badge/DMG-Apple%20Silicon-000000.svg?logo=apple&logoColor=white"), "Android", badge("Android APK", f"{base}/agentspads.apk", "https://img.shields.io/badge/APK-Android-168039.svg?logo=android&logoColor=white")); body=["<a href=\"https://qm.qq.com/q/oL9E21pt7k\"><img alt=\"QQ群\" src=\"https://img.shields.io/badge/QQ%E7%BE%A4-%E7%82%B9%E6%AD%A4%E5%8A%A0%E5%85%A5-2da44e.svg?logo=qq&logoColor=white\"></a> <a href=\"https://t.me/Neko0CM\"><img alt=\"TG群\" src=\"https://img.shields.io/badge/TG%E7%BE%A4-%E7%82%B9%E6%AD%A4%E5%8A%A0%E5%85%A5-26A5E4.svg?logo=telegram&logoColor=white\"></a>", "", "**按系统下载：**", "", "<div align=\"left\">", "<table>", "<thead align=\"left\"><tr><th>系统</th><th>下载</th></tr></thead>", "<tbody align=\"left\">"];
           [body.append(f"<tr><td>{rows[i]}</td><td>{rows[i+1]}</td></tr>") for i in range(0, len(rows), 2)]; body += ["</tbody>", "</table>", "</div>", ""]; Path("release-body.md").write_text("\n".join(body) + Path("release-notes.md").read_text())'
           jq -n \
             --arg tag_name "$RELEASE_TAG" \
@@ -397,6 +410,7 @@ jobs:
           body_path: release-body.md
           fail_on_unmatched_files: true
           files: |
+            agentspads-windows-x64-setup.exe
             agentspads-windows-x64.exe
             agentspads-macos-arm64.dmg
             agentspads-macos-arm64.zip

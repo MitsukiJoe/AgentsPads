@@ -1,8 +1,9 @@
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
+#[cfg(target_os = "macos")]
 use std::process::Command;
-#[cfg(any(target_os = "windows", test))]
-use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,10 +32,6 @@ pub fn version_label() -> String {
     }
 }
 pub const GITHUB_REPO: &str = "MitsukiJoe/AgentsPads";
-#[cfg(any(target_os = "windows", test))]
-const AFTER_UPDATE_FLAG: &str = "--after-update";
-#[cfg(target_os = "windows")]
-const POST_UPDATE_ENV: &str = "AGENTPAD_POST_UPDATE";
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UpdateInfo {
@@ -88,18 +85,28 @@ pub enum UpdateStatus {
 pub struct Updater {
     pub status: Arc<Mutex<UpdateStatus>>,
     checking: Arc<AtomicBool>,
+    updating: Arc<AtomicBool>,
 }
 
 impl Updater {
     pub fn new() -> Self {
+        let status = UpdateStatus::Idle;
+        #[cfg(windows)]
+        let status = crate::managed_update::last_notice()
+            .map(UpdateStatus::Failed)
+            .unwrap_or(status);
         Self {
-            status: Arc::new(Mutex::new(UpdateStatus::Idle)),
+            status: Arc::new(Mutex::new(status)),
             checking: Arc::new(AtomicBool::new(false)),
+            updating: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn check_for_updates(&self) {
-        if !checks_enabled() || self.checking.swap(true, Ordering::SeqCst) {
+        if !checks_enabled()
+            || self.updating.load(Ordering::SeqCst)
+            || self.checking.swap(true, Ordering::SeqCst)
+        {
             return;
         }
         let status_arc = Arc::clone(&self.status);
@@ -124,7 +131,11 @@ impl Updater {
     }
 
     pub fn start_update(&self, info: &UpdateInfo) {
+        if self.checking.load(Ordering::SeqCst) || self.updating.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let status_arc = Arc::clone(&self.status);
+        let updating_arc = Arc::clone(&self.updating);
         let info = info.clone();
         std::thread::spawn(move || {
             *status_arc.lock().unwrap() = UpdateStatus::Updating("正在下载更新...".into());
@@ -135,6 +146,7 @@ impl Updater {
                     message: e,
                 };
             }
+            updating_arc.store(false, Ordering::SeqCst);
         });
     }
 }
@@ -237,54 +249,11 @@ fn fetch_latest_release() -> Result<Option<UpdateInfo>, String> {
     }
 }
 
-#[cfg(any(target_os = "windows", test))]
-fn old_executable_path(exe: &Path) -> PathBuf {
-    let parent = exe.parent().unwrap_or_else(|| Path::new(""));
-    let name = exe
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-    parent.join(format!("{name}.old"))
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn after_update_parent_pid(args: &[std::ffi::OsString]) -> Option<u32> {
-    args.windows(2).find_map(|pair| {
-        (pair[0] == AFTER_UPDATE_FLAG)
-            .then(|| pair[1].to_string_lossy().parse().ok())
-            .flatten()
-    })
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn is_post_update_launch_for(exe: &Path, env_flag: bool, args: &[std::ffi::OsString]) -> bool {
-    env_flag || after_update_parent_pid(args).is_some() || old_executable_path(exe).exists()
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn configure_relaunch(command: &mut Command, parent_pid: u32) {
-    command
-        .arg(AFTER_UPDATE_FLAG)
-        .arg(parent_pid.to_string())
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
-}
-
 pub fn is_post_update_launch() -> bool {
     #[cfg(target_os = "windows")]
     {
-        let env_flag = std::env::var_os(POST_UPDATE_ENV).is_some();
         let args: Vec<_> = std::env::args_os().collect();
-        return std::env::current_exe()
-            .ok()
-            .is_some_and(|exe| is_post_update_launch_for(&exe, env_flag, &args));
+        args.windows(2).any(|pair| pair[0] == "--ready-challenge")
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -317,6 +286,7 @@ fn https_agent(timeout: Duration) -> Result<ureq::Agent, String> {
         .build())
 }
 
+#[cfg(any(target_os = "macos", test))]
 fn download_progress_msg(done: u64, total: u64) -> String {
     if total > 0 {
         format!("正在下载更新... {}%", done * 100 / total.max(1))
@@ -360,7 +330,8 @@ fn download_with_progress(
         done += n as u64;
         on_progress(done, total);
     }
-    file.flush().map_err(|e| format!("写入更新文件失败: {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("保存更新文件失败: {e}"))?;
     drop(file);
     if total > 0 && done != total {
         let _ = std::fs::remove_file(dest);
@@ -377,40 +348,22 @@ fn download_with_progress(
 }
 
 #[cfg(target_os = "windows")]
-fn perform_update(info: &UpdateInfo, status: &Arc<Mutex<UpdateStatus>>) -> Result<(), String> {
-    let exe_path = std::env::current_exe().map_err(|e| format!("获取当前路径失败: {e}"))?;
-    let exe_dir = exe_path
-        .parent()
-        .ok_or_else(|| "无法获取程序目录".to_string())?;
-
-    let tmp_file = exe_dir.join("agentpad_update.new");
-    let report = |done: u64, total: u64| {
-        *status.lock().unwrap() = UpdateStatus::Updating(download_progress_msg(done, total));
-    };
-    download_with_progress(&info.download_url, &tmp_file, &info.sha256, &report)?;
-
-    *status.lock().unwrap() = UpdateStatus::Updating("正在替换程序文件...".into());
-    let old_path = old_executable_path(&exe_path);
-    let _ = std::fs::remove_file(&old_path);
-
-    // 运行中的 EXE 可以改名但不能删除：先让位，再落位新文件
-    std::fs::rename(&exe_path, &old_path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp_file);
-        format!("无法移动旧程序文件（可能被安全软件占用或目录无写入权限）: {e}")
-    })?;
-    if let Err(e) = std::fs::rename(&tmp_file, &exe_path) {
-        let _ = std::fs::rename(&old_path, &exe_path);
-        return Err(format!("替换程序文件失败，已恢复旧版本: {e}"));
+pub(crate) fn download_managed_release(
+    version: &str,
+    sha256: &str,
+    destination: &Path,
+    progress: &dyn Fn(u64, u64),
+) -> Result<(), String> {
+    if parse_version(version).is_none() || !valid_sha256(sha256) {
+        return Err("更新版本或校验值无效".into());
     }
+    let url = expected_asset_url(&format!("v{version}"), "agentspads-windows-x64.exe");
+    download_with_progress(&url, destination, sha256, progress)
+}
 
-    *status.lock().unwrap() = UpdateStatus::Updating("正在启动新版本...".into());
-    let mut relaunch = Command::new(&exe_path);
-    relaunch.env(POST_UPDATE_ENV, "1");
-    configure_relaunch(&mut relaunch, std::process::id());
-    relaunch
-        .spawn()
-        .map_err(|e| format!("启动新版本失败: {e}"))?;
-    std::process::exit(0);
+#[cfg(target_os = "windows")]
+fn perform_update(info: &UpdateInfo, status: &Arc<Mutex<UpdateStatus>>) -> Result<(), String> {
+    crate::managed_update::begin(info, status)
 }
 
 #[cfg(target_os = "macos")]
@@ -503,24 +456,8 @@ fn perform_update(info: &UpdateInfo, status: &Arc<Mutex<UpdateStatus>>) -> Resul
     std::process::exit(0);
 }
 
-/// 启动时自检：清理历史版本遗留的更新产物（旧脚本式更新残留、换名替换留下的 .old）
+/// macOS 的历史更新产物清理；Windows 的恢复备份由事务提交负责管理。
 pub fn cleanup_stale_updater_script() {
-    #[cfg(target_os = "windows")]
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
-            let script = exe_dir.join("agentpad_updater.bat");
-            if script.exists() {
-                if let Ok(content) = std::fs::read_to_string(&script) {
-                    if content.contains("AgentPad Auto Updater") {
-                        let _ = std::fs::remove_file(script);
-                    }
-                }
-            }
-            let _ = std::fs::remove_file(exe_dir.join("agentpad_update.tmp"));
-            let _ = std::fs::remove_file(exe_dir.join("agentpad_update.new"));
-            let _ = std::fs::remove_file(old_executable_path(&exe_path));
-        }
-    }
     #[cfg(target_os = "macos")]
     {
         if let Ok(exe_path) = std::env::current_exe() {
@@ -622,39 +559,5 @@ mod tests {
     fn progress_message_formats() {
         assert_eq!(download_progress_msg(50, 200), "正在下载更新... 25%");
         assert!(download_progress_msg(1, 0).starts_with("正在下载更新..."));
-    }
-
-    #[test]
-    fn detects_post_update_from_flag_env_or_old_executable() {
-        let dir = std::env::temp_dir().join(format!("agentpad-relaunch-{}", uuid::Uuid::new_v4()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let exe = dir.join("agentpad.exe");
-        let old = old_executable_path(&exe);
-        let no_args = vec![std::ffi::OsString::from("agentpad.exe")];
-        let update_args = vec![
-            std::ffi::OsString::from("agentpad.exe"),
-            std::ffi::OsString::from(AFTER_UPDATE_FLAG),
-            std::ffi::OsString::from("123"),
-        ];
-        assert_eq!(old, dir.join("agentpad.exe.old"));
-        assert_eq!(after_update_parent_pid(&update_args), Some(123));
-        assert_eq!(after_update_parent_pid(&no_args), None);
-        assert!(!is_post_update_launch_for(&exe, false, &no_args));
-        assert!(is_post_update_launch_for(&exe, false, &update_args));
-        assert!(is_post_update_launch_for(&exe, true, &no_args));
-        std::fs::write(&old, b"old").unwrap();
-        assert!(is_post_update_launch_for(&exe, false, &no_args));
-        let _ = std::fs::remove_dir_all(dir);
-    }
-
-    #[test]
-    fn relaunch_command_contains_parent_pid() {
-        let mut command = Command::new("agentpad.exe");
-        configure_relaunch(&mut command, 456);
-        let args: Vec<_> = command
-            .get_args()
-            .map(|arg| arg.to_string_lossy().to_string())
-            .collect();
-        assert_eq!(args, [AFTER_UPDATE_FLAG, "456"]);
     }
 }

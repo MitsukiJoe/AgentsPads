@@ -5,6 +5,12 @@ mod elevation;
 mod handle;
 mod identity;
 mod logutil;
+#[cfg(windows)]
+mod managed_install;
+#[cfg(windows)]
+mod managed_tasks;
+#[cfg(windows)]
+mod managed_update;
 mod net;
 mod pairing;
 #[cfg(all(windows, feature = "perf-probe"))]
@@ -35,35 +41,22 @@ fn addr_in_use_action(relaunched: bool, handoff_failed: bool) -> AddrInUseAction
 }
 
 fn main() -> eframe::Result {
+    #[cfg(windows)]
+    {
+        if let Err(reason) = elevation::image_hash() {
+            return show_port_conflict_failure(&reason);
+        }
+        managed_update::exit_if_maintenance();
+    }
     elevation::exit_if_admin_maintenance();
-    if elevation::invalid_elevation_attempt() {
-        exit_process(1);
+    #[cfg(windows)]
+    if let Err(reason) = managed_update::recover_before_start() {
+        return show_port_conflict_failure(&reason);
     }
-    // Windows：开机启动项由未提权进程在提权重启前同步；提权进程里 apply 什么也不做。
-    // macOS 没有提权分支，仍在下面原来的位置调用，相对更新检查的顺序不变。
-    if cfg!(windows) {
-        autostart::apply();
-    }
-    // 设置里打开管理员模式时，新的普通进程要等旧进程退出并放开端口，再交接。
-    if let Err(reason) = elevation::wait_for_handoff_parent() {
-        let ui_result = ui::show_startup_failure(reason);
-        if let Some(exit_code) = handoff_failure_exit_code(&ui_result) {
-            exit_process(exit_code);
-        }
-        return ui_result;
-    }
-    match elevation::relaunch_if_needed() {
-        elevation::RelaunchOutcome::ContinueOrdinaryStartup => {}
-        elevation::RelaunchOutcome::HandoffStarted => return Ok(()),
-        elevation::RelaunchOutcome::ProtectedIdentityStoreFailed => {
-            let ui_result = ui::show_startup_failure(
-                "管理员身份密钥存储失败。为保护设备身份，AgentsPads 已停止启动；修复受保护存储后请重试。",
-            );
-            if let Some(exit_code) = handoff_failure_exit_code(&ui_result) {
-                exit_process(exit_code);
-            }
-            return ui_result;
-        }
+    match elevation::prepare_startup() {
+        Ok(true) => {}
+        Ok(false) => return Ok(()),
+        Err(reason) => return show_port_conflict_failure(&reason),
     }
     let post_update = updater::is_post_update_launch();
     if !cfg!(windows) {
@@ -77,7 +70,7 @@ fn main() -> eframe::Result {
             // 失败说明只写 Program Files 的 state\；普通进程这里是空操作。
             logutil::write("identity store failed");
             elevation::note_startup_failure("identity store failed", &err.to_string());
-            exit_process(1);
+            return show_port_conflict_failure(&format!("无法读取当前权限的配对信息，程序未启动：{err}。请检查安装目录权限或使用安装包修复。"));
         }
     };
     logutil::clear();
@@ -229,6 +222,7 @@ fn exit_process(code: i32) -> ! {
     std::process::exit(code)
 }
 
+#[cfg(test)]
 fn handoff_failure_exit_code<E>(ui_result: &Result<(), E>) -> Option<i32> {
     ui_result.is_ok().then_some(1)
 }
