@@ -168,7 +168,7 @@ pub fn load() -> std::io::Result<Identity> {
     if elevated() {
         return load_admin();
     }
-    Ok(load_normal())
+    Ok(load_normal_at(&data_dir().join("identity.json")))
 }
 
 pub fn save(id: &Identity) -> std::io::Result<()> {
@@ -179,33 +179,23 @@ pub fn save(id: &Identity) -> std::io::Result<()> {
     write_json(&data_dir().join("identity.json"), id)
 }
 
-/// 只读，不写盘。提权时读的是普通用户目录里的 identity.json（忽略 AGENTPAD_DATA_DIR），
-/// 只为带走 device_id 和展示名；密钥在 `admin_seed_base` 里丢掉。
-fn read_normal() -> Option<Identity> {
-    let text = read_capped(&identity_read_dir().join("identity.json"), 4096)?;
+fn read_normal_at(path: &Path) -> Option<Identity> {
+    let text = read_capped(path, 4096)?;
     serde_json::from_str::<Identity>(&text)
         .ok()
         .filter(|id| !id.device_id.is_empty())
 }
 
-fn identity_read_dir() -> PathBuf {
-    if crate::elevation::is_elevated() {
-        fixed_user_data_dir()
-    } else {
-        data_dir()
-    }
-}
-
-fn load_normal() -> Identity {
-    if let Some(mut id) = read_normal() {
+fn load_normal_at(path: &Path) -> Identity {
+    if let Some(mut id) = read_normal_at(path) {
         if id.secret.is_empty() {
             id.secret = crate::pairing::random_hex(32);
-            let _ = save(&id);
+            let _ = write_json(path, &id);
         }
         return id;
     }
     let id = seed(None);
-    let _ = save(&id);
+    let _ = write_json(path, &id);
     id
 }
 
@@ -233,7 +223,8 @@ fn load_admin() -> std::io::Result<Identity> {
         return Ok(id);
     }
     // 首次进入管理员模式：新密钥，手机需重新扫码。用户文件只提供过滤后的 device_id 与展示名。
-    let id = seed(read_normal().map(admin_seed_base));
+    let id =
+        seed(read_normal_at(&fixed_user_data_dir().join("identity.json")).map(admin_seed_base));
     write_json(&path, &id)?;
     Ok(id)
 }
@@ -334,9 +325,9 @@ fn resolve_theme(primary: Option<&str>, elevated: bool, user_theme: Option<&str>
 
 pub fn load_theme() -> String {
     let elevated = crate::elevation::is_elevated();
-    let primary = runtime_dir().and_then(|dir| read_capped(&dir.join("theme.txt"), 32));
+    let primary = runtime_dir().and_then(|dir| read_theme_at(&dir));
     let user = if elevated {
-        read_capped(&fixed_user_data_dir().join("theme.txt"), 32)
+        read_theme_at(&fixed_user_data_dir())
     } else {
         None
     };
@@ -347,8 +338,16 @@ pub fn save_theme(theme: &str) {
     let Some(dir) = runtime_dir() else {
         return;
     };
-    let _ = std::fs::create_dir_all(&dir);
-    let _ = std::fs::write(dir.join("theme.txt"), theme);
+    let _ = save_theme_at(&dir, theme);
+}
+
+fn read_theme_at(dir: &Path) -> Option<String> {
+    read_capped(&dir.join("theme.txt"), 32)
+}
+
+fn save_theme_at(dir: &Path, theme: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join("theme.txt"), theme)
 }
 
 #[cfg(test)]
@@ -358,19 +357,48 @@ mod tests {
     #[test]
     fn persists_device_id() {
         let dir = std::env::temp_dir().join(format!("agentpad-id-{}", uuid::Uuid::new_v4()));
-        std::env::set_var("AGENTPAD_DATA_DIR", &dir);
-        let a = load().unwrap();
-        let b = load().unwrap();
+        let path = dir.join("identity.json");
+        let a = load_normal_at(&path);
+        let b = load_normal_at(&path);
         assert_eq!(a.device_id, b.device_id);
         assert!(!a.device_id.is_empty());
         assert_eq!(a.secret, b.secret);
         assert_eq!(a.secret.len(), 64);
-        save_theme("dark");
-        assert_eq!(load_theme(), "dark");
-        save_theme("nope");
-        assert_eq!(load_theme(), "system");
         let _ = std::fs::remove_dir_all(dir);
-        std::env::remove_var("AGENTPAD_DATA_DIR");
+    }
+
+    #[test]
+    fn persists_repaired_secret_without_changing_device_id() {
+        let dir = std::env::temp_dir().join(format!("agentpad-id-{}", uuid::Uuid::new_v4()));
+        let path = dir.join("identity.json");
+        let original = Identity {
+            device_id: uuid::Uuid::new_v4().to_string(),
+            name: "Desk".into(),
+            secret: String::new(),
+        };
+        write_json(&path, &original).unwrap();
+        let repaired = load_normal_at(&path);
+        assert_eq!(repaired.device_id, original.device_id);
+        assert_eq!(repaired.name, original.name);
+        assert_eq!(repaired.secret.len(), 64);
+        assert_eq!(load_normal_at(&path).secret, repaired.secret);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn persists_theme_and_ignores_invalid_values() {
+        let dir = std::env::temp_dir().join(format!("agentpad-theme-{}", uuid::Uuid::new_v4()));
+        save_theme_at(&dir, "dark").unwrap();
+        assert_eq!(
+            resolve_theme(read_theme_at(&dir).as_deref(), false, None),
+            "dark"
+        );
+        save_theme_at(&dir, "nope").unwrap();
+        assert_eq!(
+            resolve_theme(read_theme_at(&dir).as_deref(), false, None),
+            "system"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
