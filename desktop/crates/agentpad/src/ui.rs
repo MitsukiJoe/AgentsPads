@@ -66,7 +66,7 @@ const EMPTY_ANIM: f32 = 0.25;
 /// Long help reads better wrapped; kept under the window so the tail is not clipped.
 const TOOLTIP_W: f32 = 360.0;
 #[cfg(windows)]
-const ADMIN_HELP: &str = "普通和管理员入口使用同一份已安装程序。管理员权限用于控制以管理员身份运行的窗口；首次启用需系统授权。切换权限不会复制程序，也不会改变版本。两种权限各自保留配对密钥，切换后请使用对应配对码。";
+const ADMIN_HELP: &str = "普通和管理员模式共用一份程序。切换成功后，下次从同一入口按所选权限启动。首次使用管理员权限需系统授权，之后通常无需再次授权。两种权限各自保留配对密钥，请使用对应配对码。";
 const FOOTER: &str = if cfg!(windows) {
     "关闭窗口后仍在系统托盘运行 · 从托盘菜单退出"
 } else {
@@ -1234,7 +1234,7 @@ impl PairingApp {
                     let mut on = self.run_as_admin;
                     if switch_block(
                         ui,
-                        "当前使用管理员权限",
+                        "管理员模式",
                         if crate::elevation::is_elevated() {
                             "当前已提权，可控制管理员窗口"
                         } else {
@@ -1712,12 +1712,12 @@ impl PairingApp {
         let (title, body) = if on {
             (
                 "切换到管理员模式",
-                "两种权限使用同一份已安装程序。\n首次使用需系统授权，以后可静默启动。\n切换后，手机需要使用对应权限的配对码。",
+                "首次使用需系统授权，以后可静默启动。\n切换成功后，下次从同一入口仍用管理员权限。\n手机请使用管理员权限的配对码。",
             )
         } else {
             (
                 "切换到普通权限",
-                "将用普通权限重新打开同一份程序。\n管理员快捷方式和已有授权仍然保留。\n手机需要使用普通权限的配对码。",
+                "将用普通权限重启，已有管理员授权保留。\n切换成功后，下次从同一入口仍用普通权限。\n手机请使用普通权限的配对码。",
             )
         };
         let screen = ctx.content_rect();

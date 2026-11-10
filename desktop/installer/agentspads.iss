@@ -55,12 +55,12 @@ UninstallAppRunningError=AgentsPads 当前仍在运行。%n%n请从系统托盘�
 WelcomeLabel2=此安装程序将安装 AgentsPads {#AppVersion}。%n%n普通启动和管理员启动共用一份正式程序。%n%n继续之前，请从托盘退出正在运行的 AgentsPads。
 SelectDirLabel3=请选择安装位置。首次安装会优先选择合适的非 C 盘。
 WizardSelectTasks=选择启动方式
-SelectTasksDesc=普通入口始终可用，管理员入口由你选择。
-SelectTasksLabel2=请选择需要的功能：
-FinishedLabel=AgentsPads 已安装。%n%n请从开始菜单打开“AgentsPads”（普通权限）。如果启用了管理员入口，也可打开“AgentsPads（管理员）”。%n%n安装程序不会自动启动应用。开机启动默认关闭，可在应用设置中开启。
+SelectTasksDesc=始终使用同一个 AgentsPads 入口。
+SelectTasksLabel2=管理员模式可随时在应用设置中切换。
+FinishedLabel=AgentsPads 已安装。%n%n请从开始菜单打开“AgentsPads”，之后会按设置中选定的权限启动。%n%n安装程序不会自动启动应用。开机启动可在应用设置中另行开启。
 
 [Tasks]
-Name: "adminlaunch"; Description: "管理员启动 — 启用操控所有窗口的能力"; Flags: unchecked
+Name: "adminlaunch"; Description: "管理员启动 — 启用操控所有窗口的能力"; Flags: unchecked checkedonce
 Name: "desktopicon"; Description: "创建桌面快捷方式"; Flags: unchecked
 
 [Files]
@@ -72,15 +72,15 @@ Source: "..\..\LICENSE"; DestDir: "{app}"; DestName: "LICENSE.txt"; Flags: ignor
 
 [Icons]
 Name: "{group}\AgentsPads"; Filename: "{app}\agentspads.exe"; WorkingDir: "{app}"; AppUserModelID: "app.agentspads"
-Name: "{group}\AgentsPads（管理员）"; Filename: "{app}\agentspads.exe"; Parameters: "--launch-admin"; WorkingDir: "{app}"; AppUserModelID: "app.agentspads.admin"; Tasks: adminlaunch
 Name: "{commondesktop}\AgentsPads"; Filename: "{app}\agentspads.exe"; WorkingDir: "{app}"; AppUserModelID: "app.agentspads"; Tasks: desktopicon
 
 [Code]
 var
-  AdminLaunchReady: Boolean;
-  AdminLaunchFailed: Boolean;
+  LaunchConfigurationFailed: Boolean;
+  LaunchConfigurationError: String;
+  HadManagedInstallation: Boolean;
   InstalledFileInvalid: Boolean;
-  HadAdminShortcut: Boolean;
+  LegacyShortcutCleanupFailed: Boolean;
   DefaultDirectoryCalculated: Boolean;
   DefaultInstallationDirectory: String;
   ExistingInstallationDirectory: String;
@@ -158,7 +158,7 @@ var
   Marker: AnsiString;
 begin
   Result := '';
-  HadAdminShortcut := FileExists(ExpandConstant('{group}\AgentsPads（管理员）.lnk'));
+  HadManagedInstallation := False;
   if CheckForMutexes('Global\AgentsPads.Managed.Running,Global\AgentsPads.Managed.Maintenance') then begin
     Result := 'AgentsPads 或其更新操作仍在运行。请等待维护完成，并从托盘退出程序后重试。';
     Exit;
@@ -175,7 +175,10 @@ begin
   if FileExists(ExpandConstant('{app}\managed-install.json')) then begin
     if not LoadStringFromFile(ExpandConstant('{app}\managed-install.json'), Marker) or
       (Trim(String(Marker)) <> '{"schema":1,"product":"AgentsPads","channel":"stable"}') then
-      Result := '现有安装记录不属于受支持的 AgentsPads 正式渠道。请先检查现有安装，避免覆盖其他渠道或损坏的安装。';
+      Result := '现有安装记录不属于受支持的 AgentsPads 正式渠道。请先检查现有安装，避免覆盖其他渠道或损坏的安装。'
+    else
+      HadManagedInstallation := FileExists(ExpandConstant('{app}\agentspads.exe')) and
+        not FileExists(ExpandConstant('{app}\launch-mode-initialization.pending'));
   end else if FileExists(ExpandConstant('{app}\agentspads.exe')) then
     Result := '目标目录内已有来源未知的程序。此次安装没有修改它。请先退出并整理旧版 AgentsPads，再重新安装。';
   if (Result = '') and not RunLocationHelper('Prepare', ExpandConstant('{app}')) then
@@ -187,6 +190,10 @@ var
   ExistingExe: String;
   BackupExe: String;
 begin
+  if not HadManagedInstallation then
+    if not SaveStringToFile(ExpandConstant('{app}\launch-mode-initialization.pending'),
+      'normal-v1' + #13#10, False) then
+      RaiseException('无法记录首次启动设置，安装已停止。请检查磁盘空间或安全软件提示后重试。');
   ExistingExe := ExpandConstant('{app}\agentspads.exe');
   BackupExe := ExpandConstant('{app}\agentspads.exe.installer-backup');
   if FileExists(ExistingExe) and not FileExists(BackupExe) then
@@ -212,22 +219,65 @@ begin
     RaiseException('程序文件校验失败，无法确认已安装所选版本。请检查安全软件提示并重新安装；原版本恢复副本保留在安装目录。');
 end;
 
-procedure ConfigureAdminLaunch;
+function ConfigureLaunch(const Parameters: String; const FailureMessage: String): Boolean;
 var
   ResultCode: Integer;
 begin
-  if not WizardIsTaskSelected('adminlaunch') then
-    Exit;
-  AdminLaunchReady := Exec(ExpandConstant('{app}\agentspads.exe'),
-    '--register-admin-launch', ExpandConstant('{app}'), SW_HIDE,
+  Result := Exec(ExpandConstant('{app}\agentspads.exe'),
+    Parameters, ExpandConstant('{app}'), SW_HIDE,
     ewWaitUntilTerminated, ResultCode);
-  AdminLaunchReady := AdminLaunchReady and (ResultCode = 0);
-  AdminLaunchFailed := not AdminLaunchReady;
-  if AdminLaunchFailed then begin
-    if not HadAdminShortcut then
-      DeleteFile(ExpandConstant('{group}\AgentsPads（管理员）.lnk'));
-    Log('Administrator launch registration failed. Exit code: ' + IntToStr(ResultCode));
-    SuppressibleMsgBox('普通程序已安装，但管理员入口未能启用。请根据刚才的错误提示处理，或从普通入口打开设置后重试。', mbError, MB_OK, IDOK);
+  Result := Result and (ResultCode = 0);
+  if not Result then begin
+    LaunchConfigurationFailed := True;
+    LaunchConfigurationError := FailureMessage;
+    Log(Parameters + ' failed. Exit code: ' + IntToStr(ResultCode));
+    SuppressibleMsgBox('程序已安装，但' + FailureMessage + '。请根据刚才的错误提示处理，或重新运行安装包修复。', mbError, MB_OK, IDOK);
+  end;
+end;
+
+procedure ConfigureLaunchMode;
+begin
+  if not HadManagedInstallation then begin
+    if not ConfigureLaunch('--configure-normal-launch', '普通启动初始化未完成') then
+      Exit;
+    if not DeleteFile(ExpandConstant('{app}\launch-mode-initialization.pending')) then begin
+      LaunchConfigurationFailed := True;
+      LaunchConfigurationError := '普通启动初始化确认未完成';
+      Log('Could not remove the pending launch-mode initialization record.');
+      SuppressibleMsgBox('普通模式已设置，但初始化记录未能清理。请检查安全软件提示后重新运行安装包修复。', mbError, MB_OK, IDOK);
+      Exit;
+    end;
+  end;
+  if WizardIsTaskSelected('adminlaunch') then
+    ConfigureLaunch('--configure-admin-launch', '管理员启动设置未完成');
+end;
+
+function RemoveLegacyAdminShortcut: Boolean;
+var
+  ShortcutPath: String;
+  TargetPath: String;
+  Arguments: String;
+  Shell: Variant;
+  Shortcut: Variant;
+begin
+  Result := True;
+  ShortcutPath := ExpandConstant('{group}\AgentsPads（管理员）.lnk');
+  if not FileExists(ShortcutPath) then
+    Exit;
+  try
+    Shell := CreateOleObject('WScript.Shell');
+    Shortcut := Shell.CreateShortcut(ShortcutPath);
+    TargetPath := Shortcut.TargetPath;
+    Arguments := Shortcut.Arguments;
+    if (CompareText(ExpandFileName(TargetPath), ExpandConstant('{app}\agentspads.exe')) <> 0) or
+      (Trim(Arguments) <> '--launch-admin') then begin
+      Log('Preserved a customized shortcut at the old administrator shortcut location.');
+      Exit;
+    end;
+    Result := DeleteFile(ShortcutPath);
+  except
+    Result := False;
+    Log('Could not inspect or remove the previous administrator shortcut.');
   end;
 end;
 
@@ -256,19 +306,19 @@ begin
   if CurStep = ssPostInstall then begin
     InstalledFileInvalid := not InstalledExecutableMatches;
     if InstalledFileInvalid then begin
-      if not HadAdminShortcut then
-        DeleteFile(ExpandConstant('{group}\AgentsPads（管理员）.lnk'));
       SuppressibleMsgBox('安装后的程序与所选版本不一致，安装未能完成。请检查安全软件提示并重新安装；原版本恢复副本保留在安装目录。', mbError, MB_OK, IDOK);
     end else if not RunLocationHelper('ProtectRegistration', ExpandConstant('{app}')) then begin
       InstalledFileInvalid := True;
-      if not HadAdminShortcut then
-        DeleteFile(ExpandConstant('{group}\AgentsPads（管理员）.lnk'));
-      SuppressibleMsgBox('安装位置登记未能完成，管理员入口尚未启用。请重新运行安装包修复。', mbError, MB_OK, IDOK);
+      SuppressibleMsgBox('安装位置登记未能完成，启动模式尚未设置。请重新运行安装包修复。', mbError, MB_OK, IDOK);
     end else if not ArchiveEarlierUpdate then begin
       InstalledFileInvalid := True;
       SuppressibleMsgBox('所选程序已写入，但旧更新记录无法归档。为避免启动错误版本，请重新运行安装包修复；旧版恢复文件仍保留。', mbError, MB_OK, IDOK);
-    end else
-      ConfigureAdminLaunch;
+    end else begin
+      ConfigureLaunchMode;
+      LegacyShortcutCleanupFailed := not RemoveLegacyAdminShortcut;
+      if LegacyShortcutCleanupFailed then
+        SuppressibleMsgBox('程序已安装，但旧的“AgentsPads（管理员）”快捷方式未能清理。今后请使用“AgentsPads”入口；可在开始菜单中手动删除旧快捷方式。', mbError, MB_OK, IDOK);
+    end;
   end;
 end;
 
@@ -277,15 +327,18 @@ begin
   if (CurPageID = wpFinished) and InstalledFileInvalid then
     WizardForm.FinishedLabel.Caption := '安装未能完成。' + #13#10#13#10 +
       '请根据刚才的错误提示处理后重新安装，或按 README 的步骤恢复保留的旧版本。'
-  else if (CurPageID = wpFinished) and AdminLaunchFailed then
-    WizardForm.FinishedLabel.Caption := 'AgentsPads 普通程序已安装，管理员入口未能启用。' + #13#10#13#10 +
-      '请从开始菜单的“AgentsPads”普通入口启动，再到设置中重试管理员授权。';
+  else if (CurPageID = wpFinished) and LaunchConfigurationFailed then
+    WizardForm.FinishedLabel.Caption := 'AgentsPads 已安装，' + LaunchConfigurationError + '。' + #13#10#13#10 +
+      '请根据刚才的错误提示处理，或重新运行安装包修复。'
+  else if (CurPageID = wpFinished) and LegacyShortcutCleanupFailed then
+    WizardForm.FinishedLabel.Caption := 'AgentsPads 已安装，旧管理员快捷方式未能清理。' + #13#10#13#10 +
+      '今后请使用“AgentsPads”入口，可在开始菜单中手动删除旧快捷方式。';
 end;
 
 function GetCustomSetupExitCode: Integer;
 begin
   Result := 0;
-  if AdminLaunchFailed or InstalledFileInvalid then
+  if LaunchConfigurationFailed or InstalledFileInvalid or LegacyShortcutCleanupFailed then
     Result := 1;
 end;
 

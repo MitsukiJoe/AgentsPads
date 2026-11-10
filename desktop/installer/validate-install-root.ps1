@@ -106,7 +106,7 @@ function Assert-InstallDirectory([string]$Directory, [bool]$CheckRegistered = $t
         $current = $current.Parent
     }
     $paths = @($directory)
-    $paths += @('agentspads.exe', 'agentspads.exe.installer-backup', 'managed-install.json', 'operation.lock', 'updates', 'updates\transaction.json', 'updates\update-worker.exe') |
+    $paths += @('agentspads.exe', 'agentspads.exe.installer-backup', 'managed-install.json', 'launch-mode-initialization.pending', 'operation.lock', 'updates', 'updates\transaction.json', 'updates\update-worker.exe') |
         ForEach-Object { Join-Path $directory $_ }
     foreach ($path in $paths) {
         if (Test-Path -LiteralPath $path) { Assert-SafePath $path 'Application' }

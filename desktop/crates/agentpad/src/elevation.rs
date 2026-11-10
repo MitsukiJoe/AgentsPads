@@ -86,13 +86,17 @@ pub(crate) fn validate_install() -> Result<PathBuf, String> {
     let exe = installed_executable()?;
     let root = exe.parent().ok_or("安装目录无效")?;
     let marker = root.join("managed-install.json");
+    let initialization = root.join("launch-mode-initialization.pending");
     crate::managed_install::validate_parent_directories(root)?;
-    for path in [root, &exe, &marker] {
+    for path in [root, &exe, &marker, &initialization] {
         if path.exists() {
             crate::managed_tasks::validate_install_acl(path)?;
         }
     }
-    if !no_reparse_ancestors(&marker) || !no_reparse_ancestors(&exe) {
+    if !no_reparse_ancestors(&marker)
+        || !no_reparse_ancestors(&exe)
+        || !no_reparse_ancestors(&initialization)
+    {
         return Err("请先使用安装包安装 AgentsPads，再使用管理员入口或更新".into());
     }
     let content = read_small(&marker, 2048).ok_or("缺少安装记录，请重新运行安装包修复")?;
@@ -132,6 +136,112 @@ pub fn image_hash() -> Result<String, String> {
 #[cfg(windows)]
 pub fn enabled() -> bool {
     crate::managed_tasks::enabled()
+}
+
+#[cfg(windows)]
+fn launch_preference_path() -> PathBuf {
+    crate::identity::fixed_user_data_dir().join("launch-mode.json")
+}
+
+#[cfg(windows)]
+fn preferred_mode() -> crate::launch_mode::Mode {
+    crate::launch_mode::decode(
+        read_small(&launch_preference_path(), 256).as_deref(),
+        env!("AGENTPAD_CHANNEL"),
+    )
+}
+
+#[cfg(windows)]
+fn write_launch_mode(mode: crate::launch_mode::Mode) -> Result<(), String> {
+    if is_elevated() || !installed() {
+        return Err("启动方式只能由已安装程序的普通权限助手保存".into());
+    }
+    crate::managed_tasks::validate_desktop_user()?;
+    let path = launch_preference_path();
+    if !no_reparse_ancestors(&path) {
+        return Err("启动方式保存位置已被重定向".into());
+    }
+    crate::launch_mode::save_at(&path, mode, env!("AGENTPAD_CHANNEL"))
+        .map_err(|_| "无法保存默认启动方式，请检查用户数据目录权限或安全软件提示".into())
+}
+
+#[cfg(windows)]
+enum RememberModeError {
+    Finished(String),
+    WriterStillRunning(String),
+}
+
+#[cfg(windows)]
+impl From<String> for RememberModeError {
+    fn from(reason: String) -> Self {
+        Self::Finished(reason)
+    }
+}
+
+#[cfg(windows)]
+impl RememberModeError {
+    fn message(self) -> String {
+        match self {
+            Self::Finished(reason) | Self::WriterStillRunning(reason) => reason,
+        }
+    }
+}
+
+#[cfg(windows)]
+fn remember_launch_mode(mode: crate::launch_mode::Mode) -> Result<(), RememberModeError> {
+    use windows::Win32::{
+        Foundation::{HANDLE, WAIT_OBJECT_0},
+        System::Threading::{GetExitCodeProcess, WaitForSingleObject},
+    };
+    if !is_elevated() {
+        return write_launch_mode(mode).map_err(RememberModeError::Finished);
+    }
+    if !installed() {
+        return Err(RememberModeError::Finished(
+            "请从正式安装程序保存启动方式".into(),
+        ));
+    }
+    let child = launch_same_user(
+        &validate_install()?,
+        &["--remember-launch-mode".into(), mode.argument().into()],
+        false,
+    )?;
+    let handle = HANDLE(child.as_raw_handle());
+    if unsafe { WaitForSingleObject(handle, 20_000) } != WAIT_OBJECT_0 {
+        if let Err(reason) = stop_spawned(&child) {
+            return Err(RememberModeError::WriterStillRunning(format!(
+                "保存助手尚未确认停止：{reason}"
+            )));
+        }
+        return Err(RememberModeError::Finished(
+            "保存启动方式超时，保存助手已停止".into(),
+        ));
+    }
+    let mut code = 1;
+    unsafe { GetExitCodeProcess(handle, &mut code) }.map_err(|e| e.to_string())?;
+    if code != 0 || preferred_mode() != mode {
+        return Err(RememberModeError::Finished(
+            "默认启动方式未能保存，请检查用户数据目录权限或安全软件提示".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(any(windows, test))]
+fn follows_launch_preference(args: &[String]) -> bool {
+    args.is_empty() || (args.len() == 1 && args[0] == "--launch-admin")
+}
+
+#[cfg(any(windows, test))]
+fn ensure_launch_initialized(executable: &std::path::Path) -> Result<(), String> {
+    let pending = executable
+        .parent()
+        .ok_or("安装目录无效")?
+        .join("launch-mode-initialization.pending");
+    match std::fs::symlink_metadata(pending) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        _ => Err("首次启动设置尚未完成，请重新运行安装包修复后再打开 AgentsPads。".into()),
+    }
 }
 
 #[cfg(windows)]
@@ -714,6 +824,7 @@ fn switch_worker(args: &[String]) -> Result<(), String> {
     let parent = parent_process(pid, created)?;
     let _lock = maintenance_lock(false, !is_elevated())?;
     let exe = validate_install()?;
+    let previous_preference = preferred_mode();
     if desired && !enabled() {
         return Err("管理员入口尚未授权".into());
     }
@@ -721,6 +832,8 @@ fn switch_worker(args: &[String]) -> Result<(), String> {
     wait_exit(&parent)?;
     let mut child: Option<OwnedHandle> = None;
     let mut task: Option<crate::managed_tasks::RunningLaunch> = None;
+    let mut saving_preference = false;
+    let mut preference_writer_running = false;
     let launched = (|| -> Result<(), String> {
         if desired {
             task = Some(crate::managed_tasks::run_tracked()?);
@@ -739,9 +852,24 @@ fn switch_worker(args: &[String]) -> Result<(), String> {
             };
             wait_ready(&hash, false, &challenge, Some(pid))?;
         }
+        saving_preference = true;
+        if let Err(error) = remember_launch_mode(if desired {
+            crate::launch_mode::Mode::Admin
+        } else {
+            crate::launch_mode::Mode::Normal
+        }) {
+            preference_writer_running = matches!(&error, RememberModeError::WriterStillRunning(_));
+            return Err(error.message());
+        }
         Ok(())
     })();
     if let Err(reason) = launched {
+        if preference_writer_running {
+            return Err(format!(
+                "当前已切换到{}权限，但默认启动方式尚未确认保存。{reason}。当前可用程序保持运行，请稍后检查启动方式。",
+                if desired { "管理员" } else { "普通" },
+            ));
+        }
         let stopped = if let Some(child) = &child {
             stop_spawned(child)
         } else if let Some(task) = &task {
@@ -750,8 +878,11 @@ fn switch_worker(args: &[String]) -> Result<(), String> {
             Ok(())
         };
         if let Err(error) = stopped {
-            return Err(format!("{reason}。新实例未能退出：{error}。程序版本未改变，请从托盘退出后重新打开需要的入口。"));
+            return Err(format!("{reason}。新实例未能退出：{error}。程序版本未改变，请从托盘退出后重新打开 AgentsPads 并检查设置。"));
         }
+        let preference_error = saving_preference
+            .then(|| remember_launch_mode(previous_preference).err())
+            .flatten();
         let challenge = uuid::Uuid::new_v4().to_string();
         let mut restore = vec!["--ready-challenge".into(), challenge.clone()];
         if previous {
@@ -765,11 +896,18 @@ fn switch_worker(args: &[String]) -> Result<(), String> {
             };
             wait_ready(&hash, previous, &challenge, Some(pid)).map(|_| ())
         });
-        return Err(if restored.is_ok() {
+        let mut message = if restored.is_ok() {
             format!("{reason}。已恢复原来的运行权限。")
         } else {
             format!("{reason}。自动恢复未成功，正式程序文件仍保留，请从开始菜单重新打开。")
-        });
+        };
+        if let Some(error) = preference_error {
+            message.push_str(&format!(
+                "默认启动方式也未能恢复：{}。请在设置中重新选择权限。",
+                error.message()
+            ));
+        }
+        return Err(message);
     }
     Ok(())
 }
@@ -839,7 +977,20 @@ pub fn exit_if_admin_maintenance() {
             let _lock = maintenance_lock(true, false)?;
             crate::managed_tasks::unregister_all()
         })(),
-        "--launch-admin" if args.len() == 1 => launch_admin_entry(),
+        "--configure-admin-launch" if args.len() == 1 => (|| {
+            let _lock = maintenance_lock(true, false)?;
+            crate::managed_tasks::register()?;
+            remember_launch_mode(crate::launch_mode::Mode::Admin)
+                .map_err(RememberModeError::message)
+        })(),
+        "--configure-normal-launch" if args.len() == 1 => (|| {
+            let _lock = maintenance_lock(true, false)?;
+            remember_launch_mode(crate::launch_mode::Mode::Normal)
+                .map_err(RememberModeError::message)
+        })(),
+        "--remember-launch-mode" if args.len() == 2 => crate::launch_mode::Mode::parse(&args[1])
+            .ok_or_else(|| "启动方式参数无效".to_string())
+            .and_then(write_launch_mode),
         "--switch-permission" => switch_worker(&args),
         "--set-autostart"
             if args.len() == 2 && matches!(args[1].as_str(), "normal" | "admin" | "off") =>
@@ -852,7 +1003,9 @@ pub fn exit_if_admin_maintenance() {
         _ => return,
     };
     if let Err(reason) = result {
-        show_error(&reason);
+        if flag != "--remember-launch-mode" {
+            show_error(&reason);
+        }
         std::process::exit(1);
     }
     std::process::exit(0);
@@ -867,7 +1020,7 @@ fn launch_admin_entry() -> Result<(), String> {
         return Err("安装或卸载尚未完成，请稍后再启动。".into());
     }
     if !installed() {
-        return Err("请从已安装的管理员快捷方式启动".into());
+        return Err("请从已安装的 AgentsPads 启动".into());
     }
     let hash = image_hash()?;
     if let Some(record) = read_ready(true) {
@@ -879,20 +1032,35 @@ fn launch_admin_entry() -> Result<(), String> {
     if let Some(record) = read_ready(false) {
         if verify_ready(record.pid, &hash, false, "") {
             focus(&record);
-            return Err("普通实例正在运行，请在现有窗口中切换到管理员权限，或从托盘退出后再打开管理员入口。".into());
+            return Ok(());
         }
     }
     if !enabled() {
-        install_task(false)?;
+        return Err(
+            "已选择管理员启动，但授权已失效。请重新运行安装包并勾选管理员启动进行修复。".into(),
+        );
     }
-    crate::managed_tasks::run()?;
-    wait_ready(&hash, true, "", None)?;
+    let task = crate::managed_tasks::run_tracked()?;
+    if let Err(reason) = wait_ready(&hash, true, "", None) {
+        task.stop().map_err(|error| format!("{reason}。{error}"))?;
+        return Err(reason);
+    }
     Ok(())
 }
 
 #[cfg(windows)]
 pub fn prepare_startup() -> Result<bool, String> {
     image_hash()?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let follow_preference = follows_launch_preference(&args);
+    if args.first().map(String::as_str) == Some("--launch-admin") {
+        if args.len() != 1 {
+            return Err("启动入口参数无效".into());
+        }
+        if !installed() {
+            return Err("请从正式安装的 AgentsPads 入口启动，下载副本不会交接到其他版本".into());
+        }
+    }
     if relaunched() && !installed() {
         return Err("管理员入口和更新交接只允许启动已安装的正式程序".into());
     }
@@ -913,6 +1081,7 @@ pub fn prepare_startup() -> Result<bool, String> {
         crate::managed_tasks::validate_desktop_user()?;
     }
     if installed() {
+        ensure_launch_initialized(&installed_executable()?)?;
         let hash = image_hash()?;
         if let Some(record) = read_ready(is_elevated()) {
             if verify_ready(record.pid, &hash, is_elevated(), "") {
@@ -923,7 +1092,35 @@ pub fn prepare_startup() -> Result<bool, String> {
         if let Some(record) = read_ready(!is_elevated()) {
             if verify_ready(record.pid, &hash, !is_elevated(), "") {
                 focus(&record);
-                return Err("另一个权限的实例正在运行。请在现有窗口切换运行权限，或先从托盘退出，再使用对应入口。".into());
+                if follow_preference {
+                    return Ok(false);
+                }
+                return Err("另一个权限的实例正在运行。请在现有窗口的设置中切换运行权限。".into());
+            }
+        }
+        if follow_preference {
+            let desired = preferred_mode() == crate::launch_mode::Mode::Admin;
+            if desired && !is_elevated() {
+                launch_admin_entry()?;
+                return Ok(false);
+            }
+            if !desired && is_elevated() {
+                let challenge = uuid::Uuid::new_v4().to_string();
+                let child = launch_same_user(
+                    &validate_install()?,
+                    &["--ready-challenge".into(), challenge.clone()],
+                    false,
+                )?;
+                let pid = unsafe {
+                    windows::Win32::System::Threading::GetProcessId(
+                        windows::Win32::Foundation::HANDLE(child.as_raw_handle()),
+                    )
+                };
+                if let Err(reason) = wait_ready(&hash, false, &challenge, Some(pid)) {
+                    stop_spawned(&child)?;
+                    return Err(reason);
+                }
+                return Ok(false);
             }
         }
         claim_app_slot()?;
@@ -954,6 +1151,39 @@ pub fn show_error(text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn incomplete_initialization_blocks_app_start_until_repair_finishes() {
+        let dir = std::env::temp_dir().join(format!("agentpad-init-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("agentspads.exe");
+        let pending = dir.join("launch-mode-initialization.pending");
+        assert!(ensure_launch_initialized(&executable).is_ok());
+        std::fs::write(&pending, b"normal-v1").unwrap();
+        assert!(ensure_launch_initialized(&executable).is_err());
+        std::fs::remove_file(&pending).unwrap();
+        assert!(ensure_launch_initialized(&executable).is_ok());
+        std::fs::remove_dir(dir).unwrap();
+    }
+
+    #[test]
+    fn only_public_launches_follow_the_saved_mode() {
+        assert!(follows_launch_preference(&[]));
+        assert!(follows_launch_preference(&["--launch-admin".into()]));
+        for args in [
+            vec!["--elevated"],
+            vec!["--login-startup"],
+            vec!["--ready-challenge", "attempt"],
+            vec!["--launch-admin", "extra"],
+            vec!["--switch-permission", "normal"],
+            vec!["--remember-launch-mode", "admin"],
+        ] {
+            assert!(!follows_launch_preference(
+                &args.into_iter().map(String::from).collect::<Vec<_>>()
+            ));
+        }
+    }
+
     fn ready() -> ReadyRecord {
         ReadyRecord {
             pid: 1,

@@ -1074,10 +1074,6 @@ pub fn run_tracked() -> Result<RunningLaunch, String> {
     })
 }
 
-pub fn run() -> Result<(), String> {
-    run_tracked().map(|_| ())
-}
-
 pub fn login_startup_mode() -> Option<bool> {
     let sid = current_user_sid().ok()?;
     with_folder(|folder| {

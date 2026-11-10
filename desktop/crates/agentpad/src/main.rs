@@ -4,6 +4,8 @@ mod autostart;
 mod elevation;
 mod handle;
 mod identity;
+#[cfg(any(windows, test))]
+mod launch_mode;
 mod logutil;
 #[cfg(windows)]
 mod managed_install;
@@ -43,6 +45,13 @@ fn addr_in_use_action(relaunched: bool, handoff_failed: bool) -> AddrInUseAction
 fn main() -> eframe::Result {
     #[cfg(windows)]
     {
+        if let Err(reason) = unsafe {
+            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(windows::core::w!(
+                "app.agentspads"
+            ))
+        } {
+            return show_port_conflict_failure(&format!("无法设置应用启动入口：{reason}"));
+        }
         if let Err(reason) = elevation::image_hash() {
             return show_port_conflict_failure(&reason);
         }
