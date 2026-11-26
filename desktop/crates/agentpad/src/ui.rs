@@ -84,6 +84,7 @@ const RESET_ARM: Duration = Duration::from_secs(4);
 struct Watched {
     nics: Vec<Nic>,
     ax_ok: bool,
+    fw_ok: bool,
     code: Option<String>,
     paused: bool,
     update: crate::updater::UpdateStatus,
@@ -94,6 +95,7 @@ impl Watched {
         Self {
             nics: net::list_nics(),
             ax_ok: agentpad_input::accessibility_trusted(),
+            fw_ok: crate::elevation::firewall_ready(),
             code: state.pairing.lock().unwrap().code().map(str::to_string),
             paused: state.paused.load(std::sync::atomic::Ordering::SeqCst),
             update: updater.status.lock().unwrap().clone(),
@@ -219,6 +221,9 @@ pub struct PairingApp {
     quit: bool,
     hidden: bool,
     ax_ok: bool,
+    fw_ok: bool,
+    #[cfg(windows)]
+    fw_error: Option<String>,
     copied_at: Option<Instant>,
     id_copied_at: Option<Instant>,
     reset_armed_at: Option<Instant>,
@@ -311,9 +316,9 @@ impl PairingApp {
             if ev.id == show_id {
                 reveal_pairing_window(&hwnd_menu);
             }
-            let send_failed = menu_tx.send(ev).is_err();
+            let _send_failed = menu_tx.send(ev).is_err();
             #[cfg(windows)]
-            if is_quit && send_failed {
+            if is_quit && _send_failed {
                 #[cfg(feature = "perf-probe")]
                 if let Some(probe) = crate::perf_probe::active() {
                     probe.record(
@@ -357,6 +362,7 @@ impl PairingApp {
         let nics = first.nics.clone();
         let selected_ip = net::default_ip(&nics).unwrap_or_default();
         let ax_ok = first.ax_ok;
+        let fw_ok = first.fw_ok;
         let watched = Arc::new(Mutex::new(first));
         spawn_watcher(
             cc.egui_ctx.clone(),
@@ -395,6 +401,9 @@ impl PairingApp {
             quit: false,
             hidden: false,
             ax_ok,
+            fw_ok,
+            #[cfg(windows)]
+            fw_error: None,
             copied_at: None,
             id_copied_at: None,
             reset_armed_at: None,
@@ -588,9 +597,13 @@ impl PairingApp {
             .lock()
             .unwrap()
             .set_window_open(!self.hidden);
-        let (nics, ax) = {
+        let (nics, ax, fw) = {
             let w = self.watched.lock().unwrap();
-            ((w.nics != self.nics).then(|| w.nics.clone()), w.ax_ok)
+            (
+                (w.nics != self.nics).then(|| w.nics.clone()),
+                w.ax_ok,
+                w.fw_ok,
+            )
         };
         if let Some(nics) = nics {
             self.apply_nics(nics);
@@ -598,6 +611,11 @@ impl PairingApp {
         ctx.set_theme(self.theme);
         apply_app_style(ctx);
         self.poll_ax(ax);
+        self.fw_ok = fw;
+        #[cfg(windows)]
+        if fw {
+            self.fw_error = None;
+        }
     }
 
     fn poll_ax(&mut self, ax: bool) {
@@ -643,7 +661,11 @@ impl eframe::App for PairingApp {
         let dark = ui.visuals().dark_mode;
         self.sync_desktop_icons(&ctx, frame, dark);
         let p = Pal::new(dark);
-        let notice = permission_notice(crate::autostart::running_from_app_bundle(), self.ax_ok);
+        let notice = permission_notice(
+            crate::autostart::running_from_app_bundle(),
+            self.ax_ok,
+            self.fw_ok,
+        );
 
         let mut content_h = 0.0;
         egui::CentralPanel::default()
@@ -892,6 +914,10 @@ impl PairingApp {
                 "需要辅助功能权限",
                 "用于从手机发送按键并控制指针。若更新后列表里已有 AgentPad 或 AgentsPads 但授权无效，请先删除旧项，再点击下方按钮为当前版本重新授权。",
             ),
+            PermissionNotice::FirewallBlocked => (
+                "Windows 防火墙正在拦截连接",
+                "当前防火墙规则阻止了 TCP 9618 入站连接，手机将无法连上电脑。点击下方按钮清理拦截规则并放行端口。",
+            ),
         };
         egui::Frame::new()
             .fill(p.warn.gamma_multiply(0.12))
@@ -937,6 +963,38 @@ impl PairingApp {
                     if pill_button(ui, b, "ax-settings", "打开系统设置", p.text, None, p).clicked()
                     {
                         agentpad_input::open_accessibility_settings();
+                    }
+                } else if notice == PermissionNotice::FirewallBlocked {
+                    #[cfg(windows)]
+                    {
+                        ui.add_space(2.0);
+                        let (row, _) =
+                            ui.allocate_exact_size(Vec2::new(inner_w, 32.0), egui::Sense::hover());
+                        let a = egui::Rect::from_min_size(row.min, Vec2::new(96.0, 32.0));
+                        if pill_button(
+                            ui,
+                            a,
+                            "fw-repair",
+                            "一键放行",
+                            p.on_accent,
+                            Some(p.accent),
+                            p,
+                        )
+                        .clicked()
+                        {
+                            match crate::elevation::repair_firewall() {
+                                Ok(()) => self.fw_error = None,
+                                Err(reason) => self.fw_error = Some(reason),
+                            }
+                            self.fw_ok = crate::elevation::firewall_ready();
+                        }
+                        if let Some(err) = &self.fw_error {
+                            ui.label(
+                                egui::RichText::new(format!("放行未完成：{err}"))
+                                    .size(12.0)
+                                    .color(p.warn),
+                            );
+                        }
                     }
                 }
             });
@@ -1216,11 +1274,11 @@ impl PairingApp {
                     ) {
                         match crate::autostart::set_enabled(on) {
                             Ok(()) => self.autostart_enabled = on,
-                            Err(reason) => {
+                            Err(_reason) => {
                                 crate::logutil::write("autostart setting failed");
                                 #[cfg(windows)]
                                 crate::elevation::note_handoff_failure(format!(
-                                    "开机启动设置未改变：{reason}"
+                                    "开机启动设置未改变：{_reason}"
                                 ));
                             }
                         }
@@ -1479,12 +1537,24 @@ impl PairingApp {
         );
         let status = self.updater.status.lock().unwrap().clone();
         let (dot, headline, sub, action) = update_card_copy(&status, p);
+        let btn_w = action
+            .as_ref()
+            .map(|(label, _)| button_w(ui, label).max(74.0))
+            .unwrap_or(0.0);
+        let max_sub_w = if btn_w > 0.0 {
+            (inner.width() - btn_w - 12.0).max(80.0)
+        } else {
+            inner.width()
+        };
         let head =
             ui.painter()
                 .layout_no_wrap(headline.clone(), egui::FontId::proportional(13.0), p.text);
-        let sub_g =
-            ui.painter()
-                .layout_no_wrap(sub.clone(), egui::FontId::proportional(12.0), p.muted);
+        let mut sub_job = egui::text::LayoutJob::single_section(
+            sub.clone(),
+            egui::TextFormat::simple(egui::FontId::proportional(12.0), p.muted),
+        );
+        sub_job.wrap = egui::text::TextWrapping::truncate_at_width(max_sub_w);
+        let sub_g = ui.painter().layout_job(sub_job);
         let block_h = head.size().y + 3.0 + sub_g.size().y;
         let y = inner.top() + 28.0;
         ui.painter().circle_filled(
@@ -1499,8 +1569,23 @@ impl PairingApp {
             sub_g,
             p.muted,
         );
+        if matches!(
+            status,
+            UpdateStatus::UpdateFailed { .. } | UpdateStatus::Failed(_)
+        ) {
+            let tip_rect = egui::Rect::from_min_size(
+                egui::pos2(inner.left(), y),
+                Vec2::new(max_sub_w, block_h),
+            );
+            ui.interact(
+                tip_rect,
+                ui.id().with("update-status-tip"),
+                egui::Sense::hover(),
+            )
+            .on_hover_text(&sub);
+        }
         if let Some((label, kind)) = action {
-            let bw = button_w(ui, &label).max(74.0);
+            let bw = btn_w;
             let b = egui::Rect::from_min_size(
                 egui::pos2(inner.right() - bw, y + block_h / 2.0 - 14.0),
                 Vec2::new(bw, 28.0),
@@ -1952,18 +2037,27 @@ fn labeled_block(
     row
 }
 
+#[cfg(any(windows, test))]
+fn admin_handoff_warning_text(reason: &str, elevated: bool) -> String {
+    let privilege = if elevated {
+        "当前已提权"
+    } else {
+        "当前普通权限"
+    };
+    if reason.starts_with("开机启动") {
+        format!("{reason}（{privilege}）")
+    } else {
+        format!("管理员模式操作未完成，{privilege}：{reason}")
+    }
+}
+
 #[cfg(windows)]
 fn admin_handoff_warning(ui: &mut egui::Ui, p: Pal) {
     let Some(reason) = crate::elevation::handoff_failure() else {
         return;
     };
     ui.add_space(8.0);
-    let privilege = if crate::elevation::is_elevated() {
-        "当前已提权"
-    } else {
-        "当前普通权限"
-    };
-    let text = format!("管理员模式操作未完成，{privilege}：{reason}");
+    let text = admin_handoff_warning_text(&reason, crate::elevation::is_elevated());
     let width = ui.available_width();
     let mut job = egui::text::LayoutJob::single_section(
         text,
@@ -2025,16 +2119,19 @@ fn update_card_copy(
             Some((format!("更新到 v{}", info.version), UpdateAction::Install)),
         ),
         UpdateStatus::Updating(msg) => (p.accent, msg.clone(), schedule, None),
-        UpdateStatus::UpdateFailed { .. } => (
+        UpdateStatus::UpdateFailed { message, .. } => (
             p.warn,
             "更新失败".into(),
-            schedule,
+            message.clone(),
             Some(("重试".into(), UpdateAction::Install)),
         ),
-        UpdateStatus::Failed(_) => (
+        UpdateStatus::Failed(message) if message.starts_with("更新") => {
+            (p.warn, "上次更新未完成".into(), message.clone(), check())
+        }
+        UpdateStatus::Failed(message) => (
             p.warn,
             "检查失败".into(),
-            schedule,
+            message.clone(),
             Some(("重试".into(), UpdateAction::Check)),
         ),
     }
@@ -2627,16 +2724,19 @@ fn theme_icon_spec(theme: ThemePreference) -> (MaterialIcon, &'static str) {
 enum PermissionNotice {
     DevelopmentLaunch,
     NeedsAccess,
+    FirewallBlocked,
 }
 
 const ICON_WHITE_PNG: &[u8] = include_bytes!("../assets/icon_white.png");
 const ICON_BLACK_PNG: &[u8] = include_bytes!("../assets/icon_black.png");
 
-fn permission_notice(packaged: bool, ax_ok: bool) -> Option<PermissionNotice> {
+fn permission_notice(packaged: bool, ax_ok: bool, fw_ok: bool) -> Option<PermissionNotice> {
     if !packaged {
         Some(PermissionNotice::DevelopmentLaunch)
     } else if !ax_ok {
         Some(PermissionNotice::NeedsAccess)
+    } else if !fw_ok {
+        Some(PermissionNotice::FirewallBlocked)
     } else {
         None
     }
@@ -2915,18 +3015,22 @@ mod tests {
     #[test]
     fn permission_notice_never_requests_access_for_bare_binary() {
         assert_eq!(
-            permission_notice(false, false),
+            permission_notice(false, false, true),
             Some(PermissionNotice::DevelopmentLaunch),
         );
         assert_eq!(
-            permission_notice(false, true),
+            permission_notice(false, true, false),
             Some(PermissionNotice::DevelopmentLaunch),
         );
         assert_eq!(
-            permission_notice(true, false),
+            permission_notice(true, false, true),
             Some(PermissionNotice::NeedsAccess),
         );
-        assert_eq!(permission_notice(true, true), None);
+        assert_eq!(
+            permission_notice(true, true, false),
+            Some(PermissionNotice::FirewallBlocked),
+        );
+        assert_eq!(permission_notice(true, true, true), None);
     }
 
     #[test]
@@ -3058,5 +3162,56 @@ mod tests {
         assert_eq!(nic_counter(&nics, "100.64.0.2"), "第 2 / 2 张");
         assert_eq!(nic_counter(&nics, "10.0.0.1"), "共 2 张");
         assert_eq!(nic_counter(&[], ""), "共 0 张");
+    }
+
+    #[test]
+    fn update_card_copy_surfaces_failure_and_recovery_details() {
+        let p = Pal::new(true);
+        let info = crate::updater::UpdateInfo {
+            tag_name: "v0.2.5".into(),
+            version: "0.2.5".into(),
+            body: String::new(),
+            download_url: "https://example.com/a.exe".into(),
+            sha256: "0".repeat(64),
+        };
+        let (_, head, sub, action) = update_card_copy(
+            &crate::updater::UpdateStatus::UpdateFailed {
+                info: Box::new(info),
+                message: "SHA-256 校验未通过".into(),
+            },
+            p,
+        );
+        assert_eq!(head, "更新失败");
+        assert_eq!(sub, "SHA-256 校验未通过");
+        assert_eq!(action.map(|a| a.0), Some("重试".into()));
+
+        let (_, head, sub, action) = update_card_copy(
+            &crate::updater::UpdateStatus::Failed("网络连接超时".into()),
+            p,
+        );
+        assert_eq!(head, "检查失败");
+        assert_eq!(sub, "网络连接超时");
+        assert_eq!(action.map(|a| a.0), Some("重试".into()));
+
+        let (_, head, sub, _) = update_card_copy(
+            &crate::updater::UpdateStatus::Failed(
+                "更新未完成：上次更新被中断。已恢复并启动上一可用版本".into(),
+            ),
+            p,
+        );
+        assert_eq!(head, "上次更新未完成");
+        assert_eq!(sub, "更新未完成：上次更新被中断。已恢复并启动上一可用版本");
+    }
+
+    #[test]
+    fn handoff_warning_formats_autostart_separately() {
+        assert_eq!(
+            admin_handoff_warning_text("开机启动设置未改变：已取消 UAC", false),
+            "开机启动设置未改变：已取消 UAC（当前普通权限）"
+        );
+        assert_eq!(
+            admin_handoff_warning_text("已取消 UAC", false),
+            "管理员模式操作未完成，当前普通权限：已取消 UAC"
+        );
     }
 }

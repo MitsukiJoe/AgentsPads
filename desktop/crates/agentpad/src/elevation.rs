@@ -1,11 +1,14 @@
 use std::sync::Mutex;
 
+#[cfg_attr(not(windows), allow(dead_code))]
 static HANDOFF_FAILURE: Mutex<Option<String>> = Mutex::new(None);
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn handoff_failure() -> Option<String> {
     HANDOFF_FAILURE.lock().ok().and_then(|v| v.clone())
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub fn note_handoff_failure(reason: impl AsRef<str>) {
     if let Ok(mut value) = HANDOFF_FAILURE.lock() {
         *value = Some(reason.as_ref().into());
@@ -52,6 +55,7 @@ struct ProcessFacts {
     hwnd: isize,
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 struct ReadyRecord {
     pid: u32,
@@ -418,6 +422,7 @@ fn read_ready(elevated: bool) -> Option<ReadyRecord> {
     serde_json::from_slice(&read_small(&ready_path(elevated)?, 8192)?).ok()
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn ready_identity_matches(
     record: &ReadyRecord,
     hash: &str,
@@ -564,6 +569,7 @@ fn join_args(args: &[String]) -> String {
         .join(" ")
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 fn quote_arg(arg: &str) -> String {
     let mut out = String::from("\"");
     let mut slashes = 0;
@@ -971,23 +977,29 @@ pub fn exit_if_admin_maintenance() {
     let result = match flag {
         "--register-admin-launch" if args.len() == 1 => (|| {
             let _lock = maintenance_lock(true, false)?;
-            crate::managed_tasks::register()
+            crate::managed_tasks::register()?;
+            let _ = ensure_firewall_allowed();
+            Ok(())
         })(),
         "--unregister-admin-launch" if args.len() == 1 => (|| {
             let _lock = maintenance_lock(true, false)?;
+            remove_firewall_rules();
             crate::managed_tasks::unregister_all()
         })(),
         "--configure-admin-launch" if args.len() == 1 => (|| {
             let _lock = maintenance_lock(true, false)?;
             crate::managed_tasks::register()?;
+            let _ = ensure_firewall_allowed();
             remember_launch_mode(crate::launch_mode::Mode::Admin)
                 .map_err(RememberModeError::message)
         })(),
         "--configure-normal-launch" if args.len() == 1 => (|| {
             let _lock = maintenance_lock(true, false)?;
+            let _ = ensure_firewall_allowed();
             remember_launch_mode(crate::launch_mode::Mode::Normal)
                 .map_err(RememberModeError::message)
         })(),
+        "--repair-firewall" if args.len() == 1 => ensure_firewall_allowed(),
         "--remember-launch-mode" if args.len() == 2 => crate::launch_mode::Mode::parse(&args[1])
             .ok_or_else(|| "启动方式参数无效".to_string())
             .and_then(write_launch_mode),
@@ -1125,6 +1137,9 @@ pub fn prepare_startup() -> Result<bool, String> {
         }
         claim_app_slot()?;
         create_close_event()?;
+        if is_elevated() && !firewall_ready() {
+            let _ = ensure_firewall_allowed();
+        }
     }
     Ok(true)
 }
@@ -1132,6 +1147,291 @@ pub fn prepare_startup() -> Result<bool, String> {
 #[cfg(not(windows))]
 pub fn prepare_startup() -> Result<bool, String> {
     Ok(true)
+}
+
+#[cfg(any(windows, test))]
+fn normalize_fw_app_path(path: &str) -> String {
+    let trimmed = path.trim().trim_matches('"');
+    let stripped = trimmed.strip_prefix(r"\\?\").unwrap_or(trimmed);
+    stripped.replace('/', "\\").to_ascii_lowercase()
+}
+
+#[cfg(any(windows, test))]
+fn fw_port_matches_9618(spec: &str) -> bool {
+    let spec = spec.trim();
+    if spec.eq_ignore_ascii_case("any") {
+        return true;
+    }
+    for part in spec.split(',') {
+        let part = part.trim();
+        if part == "9618" {
+            return true;
+        }
+        if let Some((start, end)) = part.split_once('-') {
+            if let (Ok(a), Ok(b)) = (start.trim().parse::<u16>(), end.trim().parse::<u16>()) {
+                if a <= 9618 && 9618 <= b {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// Evaluate raw `HKLM\...\FirewallPolicy\FirewallRules` values for `target_exe`.
+/// Returns `true` iff no active inbound TCP rule blocks port 9618 on Private/Public
+/// AND active inbound allow rule(s) cover both Private (`0b010`) and Public (`0b100`).
+#[cfg(any(windows, test))]
+pub fn evaluate_firewall_rules<'a>(
+    target_exe: &str,
+    rules: impl IntoIterator<Item = &'a str>,
+) -> bool {
+    let target = normalize_fw_app_path(target_exe);
+    if target.is_empty() {
+        return true;
+    }
+    let mut allowed_profiles: u8 = 0;
+
+    for raw in rules {
+        let mut active = true;
+        let mut dir_in = false;
+        let mut action_allow: Option<bool> = None;
+        let mut proto_tcp = true;
+        let mut port_matches = true;
+        let mut app: Option<&str> = None;
+        let mut profile_mask: u8 = 0;
+        let mut has_profile = false;
+
+        for token in raw.split('|') {
+            let Some((k, v)) = token.split_once('=') else {
+                continue;
+            };
+            if k.eq_ignore_ascii_case("Active") {
+                active = v.trim().eq_ignore_ascii_case("TRUE");
+            } else if k.eq_ignore_ascii_case("Dir") {
+                dir_in = v.trim().eq_ignore_ascii_case("In");
+            } else if k.eq_ignore_ascii_case("Action") {
+                if v.trim().eq_ignore_ascii_case("Allow") {
+                    action_allow = Some(true);
+                } else if v.trim().eq_ignore_ascii_case("Block") {
+                    action_allow = Some(false);
+                }
+            } else if k.eq_ignore_ascii_case("Protocol") {
+                let v = v.trim();
+                proto_tcp = v.eq_ignore_ascii_case("Any") || v == "6";
+            } else if k.eq_ignore_ascii_case("LPort") {
+                port_matches = fw_port_matches_9618(v);
+            } else if k.eq_ignore_ascii_case("App") {
+                app = Some(v);
+            } else if k.eq_ignore_ascii_case("Profile") {
+                has_profile = true;
+                for item in v.split(',') {
+                    let p = item.trim();
+                    if p.eq_ignore_ascii_case("Domain") {
+                        profile_mask |= 0b001;
+                    } else if p.eq_ignore_ascii_case("Private") {
+                        profile_mask |= 0b010;
+                    } else if p.eq_ignore_ascii_case("Public") {
+                        profile_mask |= 0b100;
+                    } else if p.eq_ignore_ascii_case("Any") {
+                        profile_mask |= 0b111;
+                    }
+                }
+            }
+        }
+
+        if !active || !dir_in || !proto_tcp || !port_matches {
+            continue;
+        }
+        let Some(app_path) = app else {
+            continue;
+        };
+        if normalize_fw_app_path(app_path) != target {
+            continue;
+        }
+        let mask = if has_profile { profile_mask } else { 0b111 };
+        match action_allow {
+            Some(false) if (mask & 0b110) != 0 => return false,
+            Some(true) => allowed_profiles |= mask,
+            _ => {}
+        }
+    }
+
+    (allowed_profiles & 0b110) == 0b110
+}
+
+#[cfg(windows)]
+pub fn firewall_ready() -> bool {
+    use windows::Win32::Foundation::{ERROR_MORE_DATA, ERROR_NO_MORE_ITEMS, ERROR_SUCCESS};
+    use windows::Win32::System::Registry::{
+        RegCloseKey, RegEnumValueW, RegOpenKeyExW, HKEY, HKEY_LOCAL_MACHINE, KEY_READ,
+        KEY_WOW64_64KEY, REG_SZ,
+    };
+
+    let target = match installed_executable()
+        .or_else(|_| std::env::current_exe().map_err(|e| e.to_string()))
+    {
+        Ok(p) => p.to_string_lossy().into_owned(),
+        Err(_) => return true,
+    };
+
+    const FW_KEY: &str =
+        r"SYSTEM\CurrentControlSet\Services\SharedAccess\Parameters\FirewallPolicy\FirewallRules";
+    let mut raw_key = HKEY::default();
+    if unsafe {
+        RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            &windows::core::HSTRING::from(FW_KEY),
+            None,
+            KEY_READ | KEY_WOW64_64KEY,
+            &mut raw_key,
+        )
+    }
+    .is_err()
+    {
+        return true;
+    }
+
+    struct KeyGuard(HKEY);
+    impl Drop for KeyGuard {
+        fn drop(&mut self) {
+            unsafe {
+                let _ = RegCloseKey(self.0);
+            }
+        }
+    }
+    let key = KeyGuard(raw_key);
+
+    let mut rules = Vec::new();
+    let mut name_buf = vec![0u16; 512];
+    let mut data_buf = vec![0u8; 4096];
+    let mut index: u32 = 0;
+
+    loop {
+        let mut name_len = name_buf.len() as u32;
+        let mut data_len = data_buf.len() as u32;
+        let mut val_type: u32 = 0;
+        let err = unsafe {
+            RegEnumValueW(
+                key.0,
+                index,
+                Some(windows::core::PWSTR(name_buf.as_mut_ptr())),
+                &mut name_len,
+                None,
+                Some(&mut val_type),
+                Some(data_buf.as_mut_ptr()),
+                Some(&mut data_len),
+            )
+        };
+        if err == ERROR_MORE_DATA {
+            if name_len as usize >= name_buf.len() {
+                name_buf.resize(name_len as usize + 64, 0);
+            }
+            if data_len as usize > data_buf.len() {
+                data_buf.resize(data_len as usize + 256, 0);
+            }
+            continue;
+        }
+        if err == ERROR_NO_MORE_ITEMS {
+            break;
+        }
+        if err != ERROR_SUCCESS {
+            return true;
+        }
+        index += 1;
+        if val_type != REG_SZ.0 || data_len < 2 {
+            continue;
+        }
+        let u16_slice: Vec<u16> = data_buf[..data_len as usize]
+            .chunks_exact(2)
+            .map(|c| u16::from_le_bytes([c[0], c[1]]))
+            .take_while(|&w| w != 0)
+            .collect();
+        rules.push(String::from_utf16_lossy(&u16_slice));
+    }
+
+    evaluate_firewall_rules(&target, rules.iter().map(String::as_str))
+}
+
+#[cfg(not(windows))]
+pub fn firewall_ready() -> bool {
+    true
+}
+
+#[cfg(windows)]
+fn run_netsh(args: &[&str]) -> Result<std::process::ExitStatus, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let sys_root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let netsh = sys_root.join("System32").join("netsh.exe");
+    std::process::Command::new(netsh)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|e| format!("无法执行 netsh：{e}"))
+}
+
+#[cfg(windows)]
+pub fn ensure_firewall_allowed() -> Result<(), String> {
+    let exe = validate_install().or_else(|_| installed_executable())?;
+    let exe_str = exe.to_string_lossy().into_owned();
+    let prog_arg = format!("program={exe_str}");
+    let _ = run_netsh(&[
+        "advfirewall",
+        "firewall",
+        "delete",
+        "rule",
+        "name=all",
+        &prog_arg,
+    ]);
+    let status = run_netsh(&[
+        "advfirewall",
+        "firewall",
+        "add",
+        "rule",
+        "name=AgentsPads",
+        "dir=in",
+        "action=allow",
+        &prog_arg,
+        "protocol=TCP",
+        "localport=9618",
+        "profile=any",
+        "enable=yes",
+    ])?;
+    if !status.success() || !firewall_ready() {
+        return Err("未能写入 Windows 防火墙放行规则".into());
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+pub fn remove_firewall_rules() {
+    if let Ok(exe) = installed_executable() {
+        let prog_arg = format!("program={}", exe.to_string_lossy());
+        let _ = run_netsh(&[
+            "advfirewall",
+            "firewall",
+            "delete",
+            "rule",
+            "name=all",
+            &prog_arg,
+        ]);
+    }
+}
+
+#[cfg(windows)]
+pub fn repair_firewall() -> Result<(), String> {
+    if is_elevated() {
+        return ensure_firewall_allowed();
+    }
+    let exe = validate_install()?;
+    shell_exec_wait(exe.as_os_str(), "--repair-firewall").map_err(String::from)?;
+    if !firewall_ready() {
+        return Err("Windows 防火墙规则仍未生效，请检查安全软件设置".into());
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -1246,5 +1546,36 @@ mod tests {
     fn windows_arguments_quote_backslashes_and_quotes() {
         assert_eq!(quote_arg("C:\\a b\\"), "\"C:\\a b\\\\\"");
         assert_eq!(quote_arg("a\"b"), "\"a\\\"b\"");
+    }
+
+    #[test]
+    fn firewall_evaluator_catches_block_and_missing_profiles() {
+        let exe = r"D:\AgentsPads\agentspads.exe";
+        assert!(!evaluate_firewall_rules(exe, std::iter::empty()));
+
+        let private_only = [
+            r"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=9618|Profile=Private|App=D:\AgentsPads\agentspads.exe|Name=AgentsPads|",
+        ];
+        assert!(!evaluate_firewall_rules(exe, private_only));
+
+        let both_profiles_plus_unrelated_udp_block = [
+            r"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=9618|Profile=Private|Profile=Public|App=d:\agentspads\agentspads.exe|Name=AgentsPads|",
+            r"v2.10|Action=Block|Active=TRUE|Dir=In|Protocol=17|Profile=Private|App=D:\agentspads\agentspads.exe|Name=AgentsPads|",
+        ];
+        assert!(evaluate_firewall_rules(
+            exe,
+            both_profiles_plus_unrelated_udp_block
+        ));
+
+        let blocked_by_query_user = [
+            r"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=9618|App=D:\AgentsPads\agentspads.exe|Name=AgentsPads|",
+            r"v2.10|Action=Block|Active=TRUE|Dir=In|Protocol=6|Profile=Private|App=D:\agentspads\agentspads.exe|Name=AgentsPads|Defer=User|",
+        ];
+        assert!(!evaluate_firewall_rules(exe, blocked_by_query_user));
+
+        let allow_all_profiles = [
+            r"v2.33|Action=Allow|Active=TRUE|Dir=In|Protocol=6|LPort=9618|App=D:\AgentsPads\agentspads.exe|Name=AgentsPads|",
+        ];
+        assert!(evaluate_firewall_rules(exe, allow_all_profiles));
     }
 }

@@ -2,7 +2,7 @@ use std::ffi::c_void;
 use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
-use arboard::Clipboard;
+use arboard::{Clipboard, SetExtApple};
 use core_foundation::base::TCFType;
 use core_foundation::boolean::CFBoolean;
 use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
@@ -116,7 +116,7 @@ pub(crate) fn open_accessibility_settings() {
 fn source() -> Result<CGEventSource, Error> {
     thread_local! {
         static SOURCE: std::cell::RefCell<Option<CGEventSource>> =
-            std::cell::RefCell::new(None);
+            const { std::cell::RefCell::new(None) };
     }
     SOURCE.with(|slot| {
         let mut slot = slot.borrow_mut();
@@ -279,12 +279,33 @@ fn inject_key_raw(key: &str, modifiers: &[String]) -> Result<(), Error> {
     Ok(())
 }
 
+fn set_clipboard_excluded(cb: &mut Clipboard, text: &str) -> Result<(), Error> {
+    cb.set()
+        .exclude_from_history()
+        .text(text.to_owned())
+        .map_err(|_| Error)
+}
+
 pub(crate) fn inject_text(text: &str) -> Result<(), Error> {
     let text = text.to_string();
     on_main(move || {
         let mut cb = Clipboard::new().map_err(|_| Error)?;
-        cb.set_text(&text).map_err(|_| Error)?;
-        inject_key_raw("v", &["Meta".into()])
+        let old = cb.get_text().ok();
+        set_clipboard_excluded(&mut cb, &text)?;
+        inject_key_raw("v", &["Meta".into()])?;
+        std::thread::sleep(Duration::from_millis(80));
+        // Only restore or clear when the clipboard still holds our temporary text after pasting.
+        if cb.get_text().ok().as_deref() == Some(text.as_str()) {
+            match old {
+                Some(old) => {
+                    let _ = set_clipboard_excluded(&mut cb, &old);
+                }
+                None => {
+                    let _ = cb.clear();
+                }
+            }
+        }
+        Ok(())
     })
 }
 

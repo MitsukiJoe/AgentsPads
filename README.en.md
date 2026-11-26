@@ -234,7 +234,7 @@ macOS users: make sure AgentsPads is granted "Accessibility" permissions under S
 **Q: Are there any text pasting limitations?**  
 **A:** AgentsPads delivers plain text.  
 Certain protected input boxes (such as secure password fields) or software that disables/remaps system paste shortcuts may reject input.  
-macOS retains the sent text on the system clipboard; Windows restores the previous text clipboard content shortly after pasting (non-text items like images are not restored).
+Both Windows and macOS restore the previous plain-text clipboard content shortly after pasting (or clear the temporary text if the clipboard held no text; non-text items such as images are not restored, and anything newly copied during the paste window is preserved), while tagging temporary writes to stay out of clipboard history and cloud clipboard sync.
 
 **Q: Does voice auto-send work with all third-party keyboards?**  
 **A:** AgentsPads never guesses input sources from text length, typing speed, or intermediate composition states. Instead, it requires strict source evidence: an Android recording session starting after the input box gains focus, or an IME explicitly declaring `voice` mode (such as Gboard voice typing).  

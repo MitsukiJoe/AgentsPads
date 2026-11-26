@@ -2,7 +2,7 @@ use std::mem::zeroed;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use arboard::Clipboard;
+use arboard::{Clipboard, SetExtWindows};
 use windows::Win32::Foundation::POINT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, INPUT_MOUSE, KEYBDINPUT, KEYEVENTF_KEYUP,
@@ -97,14 +97,37 @@ pub(crate) fn inject_key(key: &str, modifiers: &[&str]) -> Result<(), Error> {
     send(&seq)
 }
 
+#[link(name = "user32")]
+extern "system" {
+    fn GetClipboardSequenceNumber() -> u32;
+}
+
+fn set_clipboard_excluded(cb: &mut Clipboard, text: &str) -> Result<(), Error> {
+    cb.set()
+        .exclude_from_monitoring()
+        .exclude_from_cloud()
+        .exclude_from_history()
+        .text(text.to_owned())
+        .map_err(|_| Error)
+}
+
 pub(crate) fn inject_text(text: &str) -> Result<(), Error> {
     let mut cb = Clipboard::new().map_err(|_| Error)?;
     let old = cb.get_text().ok();
-    cb.set_text(text).map_err(|_| Error)?;
+    set_clipboard_excluded(&mut cb, text)?;
+    let seq = unsafe { GetClipboardSequenceNumber() };
     inject_key("v", &["Control"])?;
     std::thread::sleep(Duration::from_millis(80));
-    if let Some(old) = old {
-        let _ = cb.set_text(old);
+    // Only restore or clear when no other process modified the clipboard during the paste window.
+    if unsafe { GetClipboardSequenceNumber() } == seq {
+        match old {
+            Some(old) => {
+                let _ = set_clipboard_excluded(&mut cb, &old);
+            }
+            None => {
+                let _ = cb.clear();
+            }
+        }
     }
     Ok(())
 }

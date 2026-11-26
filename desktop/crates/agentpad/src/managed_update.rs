@@ -676,9 +676,12 @@ mod platform {
             parent_created: crate::elevation::process_creation_time(std::process::id())?,
         };
         Request::parse(&request.arguments(START)[1..])?;
-        *status.lock().unwrap() = crate::updater::UpdateStatus::Updating(
-            "正在准备更新；普通模式需要一次管理员授权…".into(),
-        );
+        let prep_msg = if crate::elevation::is_elevated() {
+            "正在准备更新…"
+        } else {
+            "正在准备更新；普通模式需要一次管理员授权…"
+        };
+        *status.lock().unwrap() = crate::updater::UpdateStatus::Updating(prep_msg.into());
         let child = crate::elevation::launch_same_user(
             &layout.executable,
             &request.arguments(START),
@@ -912,6 +915,7 @@ mod platform {
         }
         let result: Result<(), String> = (|| {
             layout.swap(&mut journal)?;
+            let _ = crate::elevation::ensure_firewall_allowed();
             layout.publish(
                 request,
                 "正在启动并检查新版的版本、权限和连接服务…",
